@@ -19,4 +19,6 @@ A user-friendly GUI for the **Kohya_ss musubi-tuner**, designed for easy use!
    .\python_embeded\python.exe train_gui.py
    ```
 
-The GUI now supports FramePack **F1** mode and the `--one_frame` training option found in the upstream project.
+The GUI now supports FramePack **F1** mode and the `--one_frame` training option.
+When caching data you can also enable `--one_frame_no_2x` or
+`--one_frame_no_4x` for finer control over the downsampling scale.
