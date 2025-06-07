@@ -1028,7 +1028,7 @@ with gr.Blocks() as demo:
                     dataset_config_text_fpack = gr.Textbox(label="Or input toml path / 或输入toml文件路径", placeholder="Example: K:/ai_software/config.toml", value=fpack_pre_caching_settings.get("dataset_config_text", ""))
                 enable_low_memory_fpack = gr.Checkbox(label="Enable Low Memory Mode / 启用低内存模式", value=fpack_pre_caching_settings.get("enable_low_memory", False))
                 skip_existing_fpack = gr.Checkbox(label="Skip Existing Cache Files (--skip_existing) / 跳过已存在的缓存文件", value=fpack_pre_caching_settings.get("skip_existing", False))
-                use_f1_checkbox = gr.Checkbox(label="Use F1 Mode (one-frame) / 使用F1模式（单帧）", value=fpack_pre_caching_settings.get("use_f1", False))
+                use_f1_checkbox = gr.Checkbox(label="Use F1 Mode (forward order) / 使用F1模式（顺序采样）", value=fpack_pre_caching_settings.get("use_f1", False))
                 use_one_frame_checkbox = gr.Checkbox(label="Use One Frame Training (--one_frame) / 使用单帧训练", value=fpack_pre_caching_settings.get("use_one_frame", False))
                 one_frame_no_2x_checkbox = gr.Checkbox(label="One Frame No 2x (--one_frame_no_2x)", value=fpack_pre_caching_settings.get("one_frame_no_2x", False))
                 one_frame_no_4x_checkbox = gr.Checkbox(label="One Frame No 4x (--one_frame_no_4x)", value=fpack_pre_caching_settings.get("one_frame_no_4x", False))
@@ -1275,7 +1275,7 @@ with gr.Blocks() as demo:
         def toggle_clip_input_fpack(checked):
             return gr.update(visible=checked)
         use_clip_fpack.change(toggle_clip_input_fpack, inputs=use_clip_fpack, outputs=clip_model_path_fpack_train)
-        use_f1_checkbox = gr.Checkbox(label="Enable F1 Mode (one-frame) / 启用F1模式（单帧）", value=fpack_training_settings.get("use_f1", False))
+        use_f1_checkbox = gr.Checkbox(label="Enable F1 Mode (forward order) / 启用F1模式（顺序采样）", value=fpack_training_settings.get("use_f1", False))
         use_one_frame_checkbox = gr.Checkbox(label="Use One Frame (--one_frame) / 使用单帧", value=fpack_training_settings.get("use_one_frame", False))
         with gr.Row():
             generate_samples_checkbox_fpack = gr.Checkbox(label="Generate Samples During Training? / 训练期间生成示例?", value=fpack_training_settings.get("generate_samples", False))
@@ -1376,7 +1376,7 @@ with gr.Blocks() as demo:
 7. **LoRA Conversion**：选择 `.safetensors` 文件后，输出文件名将自动添加 `_converted.safetensors` 后缀。
 8. **训练续训**：在训练页面中，启用"从已有权重继续训练"后，请确保权重文件路径正确。
 9. **FramePack 训练**：FramePack 仅支持 Image-to-Video (I2V) 训练，不支持 Text-to-Video (T2V)。
-10. **FramePack 预缓存**：默认使用 Inverted anti-drifting 采样方法，可以选择启用 F1 模式（单帧训练）。
+10. **FramePack 预缓存**：默认使用 Inverted anti-drifting 采样方法，可以选择启用 F1 模式（顺序采样）。
 11. **FramePack 模型文件**：FramePack 需要额外的 Image Encoder (SigLIP) 模型，且使用特定的 DiT 模型。
 12. **FramePack 批量大小**：如果 batch size 大于 1，建议启用 Split Attention 选项。
     """)
