@@ -25,3 +25,4 @@ The GUI now supports FramePack **F1** mode (forward-order sampling) and the
 scale.
 You can configure checkpoint saving frequency either per-epoch or per-step using
 the new `Save Every N Steps` option on each training tab.
+Gradient accumulation steps can also be set for all training modes.

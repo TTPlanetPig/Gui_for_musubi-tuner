@@ -586,6 +586,7 @@ def run_wan_training(
     max_train_epochs: int,
     learning_rate: str,
     network_dim: int,
+    gradient_accumulation_steps: int,
     enable_low_vram: bool,
     blocks_to_swap: int,
     output_dir: str,
@@ -632,6 +633,7 @@ def run_wan_training(
         "--optimizer_type", "adamw8bit",
         "--learning_rate", learning_rate,
         "--gradient_checkpointing",
+        f"--gradient_accumulation_steps={gradient_accumulation_steps}",
         "--max_data_loader_n_workers", "2",
         "--persistent_data_loader_workers",
         "--network_module", "networks.lora_wan",
@@ -682,6 +684,7 @@ def run_wan_training(
             "max_train_epochs": max_train_epochs,
             "learning_rate": learning_rate,
             "network_dim": network_dim,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
             "enable_low_vram": enable_low_vram,
             "blocks_to_swap": blocks_to_swap,
             "output_dir": output_dir,
@@ -746,6 +749,7 @@ def run_fpack_training(
     max_train_epochs: int,
     learning_rate: str,
     network_dim: int,
+    gradient_accumulation_steps: int,
     enable_low_vram: bool,
     blocks_to_swap: int,
     output_dir: str,
@@ -799,6 +803,7 @@ def run_fpack_training(
         "--optimizer_type", "adamw8bit",
         "--learning_rate", learning_rate,
         "--gradient_checkpointing",
+        f"--gradient_accumulation_steps={gradient_accumulation_steps}",
         "--max_data_loader_n_workers", "2",
         "--persistent_data_loader_workers",
         "--network_module", "networks.lora_framepack",
@@ -853,6 +858,7 @@ def run_fpack_training(
             "max_train_epochs": max_train_epochs,
             "learning_rate": learning_rate,
             "network_dim": network_dim,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
             "enable_low_vram": enable_low_vram,
             "blocks_to_swap": blocks_to_swap,
             "output_dir": output_dir,
@@ -1171,6 +1177,8 @@ with gr.Blocks() as demo:
             learning_rate_wan = gr.Textbox(label="Learning Rate (e.g. 2e-4) / 学习率", value=wan_training_settings.get("learning_rate", "2e-4"))
         with gr.Row():
             network_dim_wan = gr.Number(label="Network Dim (2-128) / 网络维度", value=wan_training_settings.get("network_dim", 32), precision=0)
+            gradient_accumulation_steps_wan = gr.Number(label="Gradient Accumulation Steps / 梯度累积步数", value=wan_training_settings.get("gradient_accumulation_steps", 1), precision=0)
+        with gr.Row():
             timestep_sampling_input = gr.Textbox(label="Timestep Sampling / 时间步采样", value=wan_training_settings.get("timestep_sampling", "shift"))
             discrete_flow_shift_input = gr.Number(label="Discrete Flow Shift / 离散流移位", value=wan_training_settings.get("discrete_flow_shift", 3.0), precision=1)
         with gr.Row():
@@ -1224,7 +1232,7 @@ with gr.Blocks() as demo:
                 dataset_config_file_wan, dataset_config_text_wan,
                 task_dropdown, dit_weights_path_wan,
                 max_train_epochs_wan, learning_rate_wan, network_dim_wan,
-                enable_low_vram_wan, blocks_to_swap_wan,
+                gradient_accumulation_steps_wan, enable_low_vram_wan, blocks_to_swap_wan,
                 output_dir_wan, output_name_wan, save_every_n_epochs_wan, save_every_n_steps_wan,
                 use_network_weights_wan, network_weights_path_wan,
                 use_clip_wan, clip_model_path_wan,
@@ -1263,6 +1271,7 @@ with gr.Blocks() as demo:
             learning_rate_fpack = gr.Textbox(label="Learning Rate (e.g. 2e-4) / 学习率", value=fpack_training_settings.get("learning_rate", "2e-4"))
             network_dim_fpack = gr.Number(label="Network Dim (2-128) / 网络维度", value=fpack_training_settings.get("network_dim", 32), precision=0)
         with gr.Row():
+            gradient_accumulation_steps_fpack = gr.Number(label="Gradient Accumulation Steps / 梯度累积步数", value=fpack_training_settings.get("gradient_accumulation_steps", 1), precision=0)
             enable_low_vram_fpack = gr.Checkbox(label="Enable Low VRAM Mode / 启用低显存模式", value=fpack_training_settings.get("enable_low_vram", False))
             blocks_to_swap_fpack = gr.Number(label="Blocks to Swap (20-36, even) / 交换块数(20-36，双数)", value=fpack_training_settings.get("blocks_to_swap", 20), precision=0, visible=fpack_training_settings.get("enable_low_vram", False))
             split_attn = gr.Checkbox(label="Enable Split Attention (For batch size > 1) / 启用分割注意力(用于批量大小>1)", value=fpack_training_settings.get("split_attn", False))
@@ -1349,7 +1358,7 @@ with gr.Blocks() as demo:
             inputs=[
                 dataset_config_file_fpack_train, dataset_config_text_fpack_train,
                 dit_weights_path_fpack, max_train_epochs_fpack, learning_rate_fpack, network_dim_fpack,
-                enable_low_vram_fpack, blocks_to_swap_fpack, output_dir_fpack, output_name_fpack,
+                gradient_accumulation_steps_fpack, enable_low_vram_fpack, blocks_to_swap_fpack, output_dir_fpack, output_name_fpack,
                 save_every_n_epochs_fpack, save_every_n_steps_fpack, use_network_weights_fpack, network_weights_path_fpack,
                 use_clip_fpack, clip_model_path_fpack_train, vae_path_fpack_train,
                 text_encoder1_path_fpack_train, text_encoder2_path_fpack_train, image_encoder_path_train,
