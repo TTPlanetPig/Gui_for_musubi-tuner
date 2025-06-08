@@ -426,6 +426,7 @@ def run_training(
     output_dir: str,
     output_name: str,
     save_every_n_epochs: int,
+    save_every_n_steps: int,
     use_network_weights: bool,
     network_weights_path: str,
     use_clip: bool,
@@ -479,7 +480,8 @@ def run_training(
         f"--gradient_accumulation_steps={gradient_accumulation_steps}",
         "--logging_dir", "./log",
         "--log_with", "tensorboard",
-        "--save_every_n_epochs", str(save_every_n_epochs)
+        "--save_every_n_epochs", str(save_every_n_epochs),
+        "--save_every_n_steps", str(save_every_n_steps)
     ]
     if enable_low_vram:
         command.extend(["--blocks_to_swap", str(blocks_to_swap)])
@@ -524,6 +526,7 @@ def run_training(
             "output_dir": output_dir,
             "output_name": output_name,
             "save_every_n_epochs": save_every_n_epochs,
+            "save_every_n_steps": save_every_n_steps,
             "use_network_weights": use_network_weights,
             "network_weights_path": network_weights_path,
             "use_clip": use_clip,
@@ -588,6 +591,7 @@ def run_wan_training(
     output_dir: str,
     output_name: str,
     save_every_n_epochs: int,
+    save_every_n_steps: int,
     use_network_weights: bool,
     network_weights_path: str,
     use_clip: bool,
@@ -636,6 +640,7 @@ def run_wan_training(
         "--discrete_flow_shift", str(discrete_flow_shift),
         "--max_train_epochs", str(max_train_epochs),
         "--save_every_n_epochs", str(save_every_n_epochs),
+        "--save_every_n_steps", str(save_every_n_steps),
         "--seed", "42",
         "--output_dir", output_dir,
         "--output_name", output_name
@@ -682,6 +687,7 @@ def run_wan_training(
             "output_dir": output_dir,
             "output_name": output_name,
             "save_every_n_epochs": save_every_n_epochs,
+            "save_every_n_steps": save_every_n_steps,
             "use_network_weights": use_network_weights,
             "network_weights_path": network_weights_path,
             "use_clip": use_clip,
@@ -745,6 +751,7 @@ def run_fpack_training(
     output_dir: str,
     output_name: str,
     save_every_n_epochs: int,
+    save_every_n_steps: int,
     use_network_weights: bool,
     network_weights_path: str,
     use_clip: bool,
@@ -800,6 +807,7 @@ def run_fpack_training(
         "--discrete_flow_shift", "3.0",
         "--max_train_epochs", str(max_train_epochs),
         "--save_every_n_epochs", str(save_every_n_epochs),
+        "--save_every_n_steps", str(save_every_n_steps),
         "--seed", "42",
         "--output_dir", output_dir,
         "--output_name", output_name
@@ -850,6 +858,7 @@ def run_fpack_training(
             "output_dir": output_dir,
             "output_name": output_name,
             "save_every_n_epochs": save_every_n_epochs,
+            "save_every_n_steps": save_every_n_steps,
             "use_network_weights": use_network_weights,
             "network_weights_path": network_weights_path,
             "use_clip": use_clip,
@@ -1084,6 +1093,7 @@ with gr.Blocks() as demo:
             output_name_input = gr.Textbox(label="Output Name / 输出名称", placeholder="lora_model", value=training_settings.get("output_name", "lora"))
         with gr.Row():
             save_every_n_epochs = gr.Number(label="Save Every N Epochs / 每N个轮次保存一次", value=training_settings.get("save_every_n_epochs", 1), precision=0)
+            save_every_n_steps_input = gr.Number(label="Save Every N Steps / 每N步保存一次", value=training_settings.get("save_every_n_steps", 0), precision=0)
         with gr.Row():
             use_network_weights = gr.Checkbox(label="Continue Training From Existing Weights / 从已有权重继续训练", value=training_settings.get("use_network_weights", False))
             network_weights_path = gr.Textbox(label="Weights File Path / 权重文件路径", placeholder="Input weights file path / 请输入权重文件路径", value=training_settings.get("network_weights_path", ""), visible=training_settings.get("use_network_weights", False))
@@ -1130,7 +1140,7 @@ with gr.Blocks() as demo:
                 max_train_epochs, learning_rate,
                 network_dim, network_alpha,
                 gradient_accumulation_steps, enable_low_vram, blocks_to_swap,
-                output_dir_input, output_name_input, save_every_n_epochs,
+                output_dir_input, output_name_input, save_every_n_epochs, save_every_n_steps_input,
                 use_network_weights, network_weights_path,
                 use_clip_checkbox_train, clip_model_path_train,
                 dit_weights_path,
@@ -1174,6 +1184,7 @@ with gr.Blocks() as demo:
             output_name_wan = gr.Textbox(label="Output Name / 输出名称", placeholder="wan_lora", value=wan_training_settings.get("output_name", "wan_lora"))
         with gr.Row():
             save_every_n_epochs_wan = gr.Number(label="Save Every N Epochs / 每N个轮次保存一次", value=wan_training_settings.get("save_every_n_epochs", 1), precision=0)
+            save_every_n_steps_wan = gr.Number(label="Save Every N Steps / 每N步保存一次", value=wan_training_settings.get("save_every_n_steps", 0), precision=0)
         with gr.Row():
             use_network_weights_wan = gr.Checkbox(label="Continue Training From Existing Weights / 从已有权重继续训练", value=wan_training_settings.get("use_network_weights", False))
             network_weights_path_wan = gr.Textbox(label="Weights File Path / 权重文件路径", placeholder="Input weights file path / 请输入权重文件路径", value=wan_training_settings.get("network_weights_path", ""), visible=wan_training_settings.get("use_network_weights", False))
@@ -1214,7 +1225,7 @@ with gr.Blocks() as demo:
                 task_dropdown, dit_weights_path_wan,
                 max_train_epochs_wan, learning_rate_wan, network_dim_wan,
                 enable_low_vram_wan, blocks_to_swap_wan,
-                output_dir_wan, output_name_wan, save_every_n_epochs_wan,
+                output_dir_wan, output_name_wan, save_every_n_epochs_wan, save_every_n_steps_wan,
                 use_network_weights_wan, network_weights_path_wan,
                 use_clip_wan, clip_model_path_wan,
                 timestep_sampling_input, discrete_flow_shift_input,
@@ -1263,6 +1274,7 @@ with gr.Blocks() as demo:
             output_name_fpack = gr.Textbox(label="Output Name / 输出名称", placeholder="fpack_lora", value=fpack_training_settings.get("output_name", "fpack_lora"))
         with gr.Row():
             save_every_n_epochs_fpack = gr.Number(label="Save Every N Epochs / 每N个轮次保存一次", value=fpack_training_settings.get("save_every_n_epochs", 1), precision=0)
+            save_every_n_steps_fpack = gr.Number(label="Save Every N Steps / 每N步保存一次", value=fpack_training_settings.get("save_every_n_steps", 0), precision=0)
         with gr.Row():
             use_network_weights_fpack = gr.Checkbox(label="Continue Training From Existing Weights / 从已有权重继续训练", value=fpack_training_settings.get("use_network_weights", False))
             network_weights_path_fpack = gr.Textbox(label="Weights File Path / 权重文件路径", placeholder="Input weights file path / 请输入权重文件路径", value=fpack_training_settings.get("network_weights_path", ""), visible=fpack_training_settings.get("use_network_weights", False))
@@ -1338,7 +1350,7 @@ with gr.Blocks() as demo:
                 dataset_config_file_fpack_train, dataset_config_text_fpack_train,
                 dit_weights_path_fpack, max_train_epochs_fpack, learning_rate_fpack, network_dim_fpack,
                 enable_low_vram_fpack, blocks_to_swap_fpack, output_dir_fpack, output_name_fpack,
-                save_every_n_epochs_fpack, use_network_weights_fpack, network_weights_path_fpack,
+                save_every_n_epochs_fpack, save_every_n_steps_fpack, use_network_weights_fpack, network_weights_path_fpack,
                 use_clip_fpack, clip_model_path_fpack_train, vae_path_fpack_train,
                 text_encoder1_path_fpack_train, text_encoder2_path_fpack_train, image_encoder_path_train,
                 generate_samples_checkbox_fpack, sample_every_n_epochs_fpack, sample_every_n_steps_fpack,
