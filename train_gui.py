@@ -283,7 +283,10 @@ def run_fpack_cache_commands(
     skip_existing: bool,
     use_clip: bool,
     clip_model_path: str,
-    use_vanilla_sampling: bool,
+    use_f1: bool,
+    use_one_frame: bool,
+    one_frame_no_2x: bool,
+    one_frame_no_4x: bool,
     vae_path: str,
     image_encoder_path: str,
     text_encoder1_path: str,
@@ -300,8 +303,14 @@ def run_fpack_cache_commands(
         "--image_encoder", image_encoder_path,
         "--vae_chunk_size", "32",
     ]
-    if use_vanilla_sampling:
-        cache_latents_cmd.append("--vanilla_sampling")
+    if use_f1:
+        cache_latents_cmd.append("--f1")
+    if use_one_frame:
+        cache_latents_cmd.append("--one_frame")
+        if one_frame_no_2x:
+            cache_latents_cmd.append("--one_frame_no_2x")
+        if one_frame_no_4x:
+            cache_latents_cmd.append("--one_frame_no_4x")
     if enable_low_memory:
         cache_latents_cmd.extend(["--vae_spatial_tile_sample_min_size", "128", "--batch_size", "1"])
     if skip_existing:
@@ -358,7 +367,10 @@ def run_fpack_cache_commands(
             "skip_existing": skip_existing,
             "use_clip": use_clip,
             "clip_model_path": clip_model_path,
-            "use_vanilla_sampling": use_vanilla_sampling,
+            "use_f1": use_f1,
+            "use_one_frame": use_one_frame,
+            "one_frame_no_2x": one_frame_no_2x,
+            "one_frame_no_4x": one_frame_no_4x,
             "vae_path": vae_path,
             "image_encoder_path": image_encoder_path,
             "text_encoder1_path": text_encoder1_path,
@@ -414,6 +426,7 @@ def run_training(
     output_dir: str,
     output_name: str,
     save_every_n_epochs: int,
+    save_every_n_steps: int,
     use_network_weights: bool,
     network_weights_path: str,
     use_clip: bool,
@@ -467,7 +480,8 @@ def run_training(
         f"--gradient_accumulation_steps={gradient_accumulation_steps}",
         "--logging_dir", "./log",
         "--log_with", "tensorboard",
-        "--save_every_n_epochs", str(save_every_n_epochs)
+        "--save_every_n_epochs", str(save_every_n_epochs),
+        "--save_every_n_steps", str(save_every_n_steps)
     ]
     if enable_low_vram:
         command.extend(["--blocks_to_swap", str(blocks_to_swap)])
@@ -512,6 +526,7 @@ def run_training(
             "output_dir": output_dir,
             "output_name": output_name,
             "save_every_n_epochs": save_every_n_epochs,
+            "save_every_n_steps": save_every_n_steps,
             "use_network_weights": use_network_weights,
             "network_weights_path": network_weights_path,
             "use_clip": use_clip,
@@ -571,11 +586,13 @@ def run_wan_training(
     max_train_epochs: int,
     learning_rate: str,
     network_dim: int,
+    gradient_accumulation_steps: int,
     enable_low_vram: bool,
     blocks_to_swap: int,
     output_dir: str,
     output_name: str,
     save_every_n_epochs: int,
+    save_every_n_steps: int,
     use_network_weights: bool,
     network_weights_path: str,
     use_clip: bool,
@@ -616,6 +633,7 @@ def run_wan_training(
         "--optimizer_type", "adamw8bit",
         "--learning_rate", learning_rate,
         "--gradient_checkpointing",
+        f"--gradient_accumulation_steps={gradient_accumulation_steps}",
         "--max_data_loader_n_workers", "2",
         "--persistent_data_loader_workers",
         "--network_module", "networks.lora_wan",
@@ -624,6 +642,7 @@ def run_wan_training(
         "--discrete_flow_shift", str(discrete_flow_shift),
         "--max_train_epochs", str(max_train_epochs),
         "--save_every_n_epochs", str(save_every_n_epochs),
+        "--save_every_n_steps", str(save_every_n_steps),
         "--seed", "42",
         "--output_dir", output_dir,
         "--output_name", output_name
@@ -665,11 +684,13 @@ def run_wan_training(
             "max_train_epochs": max_train_epochs,
             "learning_rate": learning_rate,
             "network_dim": network_dim,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
             "enable_low_vram": enable_low_vram,
             "blocks_to_swap": blocks_to_swap,
             "output_dir": output_dir,
             "output_name": output_name,
             "save_every_n_epochs": save_every_n_epochs,
+            "save_every_n_steps": save_every_n_steps,
             "use_network_weights": use_network_weights,
             "network_weights_path": network_weights_path,
             "use_clip": use_clip,
@@ -728,11 +749,13 @@ def run_fpack_training(
     max_train_epochs: int,
     learning_rate: str,
     network_dim: int,
+    gradient_accumulation_steps: int,
     enable_low_vram: bool,
     blocks_to_swap: int,
     output_dir: str,
     output_name: str,
     save_every_n_epochs: int,
+    save_every_n_steps: int,
     use_network_weights: bool,
     network_weights_path: str,
     use_clip: bool,
@@ -753,6 +776,8 @@ def run_fpack_training(
     custom_prompt_txt: bool,
     custom_prompt_path: str,
     prompt_file_upload: str,
+    use_f1: bool,
+    use_one_frame: bool,
     split_attn: bool,
 ) -> Generator[str, None, None]:
     dataset_config = get_dataset_config(dataset_config_file, dataset_config_text)
@@ -778,6 +803,7 @@ def run_fpack_training(
         "--optimizer_type", "adamw8bit",
         "--learning_rate", learning_rate,
         "--gradient_checkpointing",
+        f"--gradient_accumulation_steps={gradient_accumulation_steps}",
         "--max_data_loader_n_workers", "2",
         "--persistent_data_loader_workers",
         "--network_module", "networks.lora_framepack",
@@ -786,6 +812,7 @@ def run_fpack_training(
         "--discrete_flow_shift", "3.0",
         "--max_train_epochs", str(max_train_epochs),
         "--save_every_n_epochs", str(save_every_n_epochs),
+        "--save_every_n_steps", str(save_every_n_steps),
         "--seed", "42",
         "--output_dir", output_dir,
         "--output_name", output_name
@@ -796,6 +823,10 @@ def run_fpack_training(
         command.extend(["--network_weights", network_weights_path.strip()])
     if use_clip and clip_model_path.strip():
         command.extend(["--clip", clip_model_path.strip()])
+    if use_f1:
+        command.append("--f1")
+    if use_one_frame:
+        command.append("--one_frame")
     if split_attn:
         command.append("--split_attn")
     if generate_samples:
@@ -827,11 +858,13 @@ def run_fpack_training(
             "max_train_epochs": max_train_epochs,
             "learning_rate": learning_rate,
             "network_dim": network_dim,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
             "enable_low_vram": enable_low_vram,
             "blocks_to_swap": blocks_to_swap,
             "output_dir": output_dir,
             "output_name": output_name,
             "save_every_n_epochs": save_every_n_epochs,
+            "save_every_n_steps": save_every_n_steps,
             "use_network_weights": use_network_weights,
             "network_weights_path": network_weights_path,
             "use_clip": use_clip,
@@ -852,6 +885,8 @@ def run_fpack_training(
             "custom_prompt_txt": custom_prompt_txt,
             "custom_prompt_path": custom_prompt_path,
             "prompt_file_upload": prompt_file_upload,
+            "use_f1": use_f1,
+            "use_one_frame": use_one_frame,
             "split_attn": split_attn
         }
     }
@@ -1008,7 +1043,10 @@ with gr.Blocks() as demo:
                     dataset_config_text_fpack = gr.Textbox(label="Or input toml path / 或输入toml文件路径", placeholder="Example: K:/ai_software/config.toml", value=fpack_pre_caching_settings.get("dataset_config_text", ""))
                 enable_low_memory_fpack = gr.Checkbox(label="Enable Low Memory Mode / 启用低内存模式", value=fpack_pre_caching_settings.get("enable_low_memory", False))
                 skip_existing_fpack = gr.Checkbox(label="Skip Existing Cache Files (--skip_existing) / 跳过已存在的缓存文件", value=fpack_pre_caching_settings.get("skip_existing", False))
-                use_vanilla_sampling = gr.Checkbox(label="Use Vanilla Sampling (Default: Inverted anti-drifting) / 使用Vanilla采样（默认使用Inverted anti-drifting）", value=fpack_pre_caching_settings.get("use_vanilla_sampling", False))
+                use_f1_checkbox = gr.Checkbox(label="Use F1 Mode (forward order) / 使用F1模式（顺序采样）", value=fpack_pre_caching_settings.get("use_f1", False))
+                use_one_frame_checkbox = gr.Checkbox(label="Use One Frame Training (--one_frame) / 使用单帧训练", value=fpack_pre_caching_settings.get("use_one_frame", False))
+                one_frame_no_2x_checkbox = gr.Checkbox(label="One Frame No 2x (--one_frame_no_2x)", value=fpack_pre_caching_settings.get("one_frame_no_2x", False))
+                one_frame_no_4x_checkbox = gr.Checkbox(label="One Frame No 4x (--one_frame_no_4x)", value=fpack_pre_caching_settings.get("one_frame_no_4x", False))
                 with gr.Row():
                     vae_path_fpack = gr.Textbox(label="FramePack VAE File Path / FramePack VAE文件路径", placeholder="Example: K:/models/framepack/vae.safetensors", value=fpack_pre_caching_settings.get("vae_path", ""))
                     image_encoder_path = gr.Textbox(label="Image Encoder (SigLIP) Path / 图像编码器(SigLIP)路径", placeholder="Example: K:/models/framepack/image_encoder.safetensors", value=fpack_pre_caching_settings.get("image_encoder_path", ""))
@@ -1028,8 +1066,9 @@ with gr.Blocks() as demo:
                 run_cache_button_fpack.click(
                     fn=run_fpack_cache_commands,
                     inputs=[dataset_config_file_fpack, dataset_config_text_fpack, enable_low_memory_fpack, skip_existing_fpack,
-                            use_clip_checkbox_fpack, clip_model_path_fpack, use_vanilla_sampling, vae_path_fpack, 
-                            image_encoder_path, text_encoder1_path_fpack, text_encoder2_path_fpack],
+                            use_clip_checkbox_fpack, clip_model_path_fpack, use_f1_checkbox, use_one_frame_checkbox,
+                            one_frame_no_2x_checkbox, one_frame_no_4x_checkbox,
+                            vae_path_fpack, image_encoder_path, text_encoder1_path_fpack, text_encoder2_path_fpack],
                     outputs=cache_output_fpack
                 )
                 stop_cache_button_fpack.click(fn=stop_caching, inputs=None, outputs=cache_output_fpack)
@@ -1060,6 +1099,7 @@ with gr.Blocks() as demo:
             output_name_input = gr.Textbox(label="Output Name / 输出名称", placeholder="lora_model", value=training_settings.get("output_name", "lora"))
         with gr.Row():
             save_every_n_epochs = gr.Number(label="Save Every N Epochs / 每N个轮次保存一次", value=training_settings.get("save_every_n_epochs", 1), precision=0)
+            save_every_n_steps_input = gr.Number(label="Save Every N Steps / 每N步保存一次", value=training_settings.get("save_every_n_steps", 0), precision=0)
         with gr.Row():
             use_network_weights = gr.Checkbox(label="Continue Training From Existing Weights / 从已有权重继续训练", value=training_settings.get("use_network_weights", False))
             network_weights_path = gr.Textbox(label="Weights File Path / 权重文件路径", placeholder="Input weights file path / 请输入权重文件路径", value=training_settings.get("network_weights_path", ""), visible=training_settings.get("use_network_weights", False))
@@ -1106,7 +1146,7 @@ with gr.Blocks() as demo:
                 max_train_epochs, learning_rate,
                 network_dim, network_alpha,
                 gradient_accumulation_steps, enable_low_vram, blocks_to_swap,
-                output_dir_input, output_name_input, save_every_n_epochs,
+                output_dir_input, output_name_input, save_every_n_epochs, save_every_n_steps_input,
                 use_network_weights, network_weights_path,
                 use_clip_checkbox_train, clip_model_path_train,
                 dit_weights_path,
@@ -1137,6 +1177,8 @@ with gr.Blocks() as demo:
             learning_rate_wan = gr.Textbox(label="Learning Rate (e.g. 2e-4) / 学习率", value=wan_training_settings.get("learning_rate", "2e-4"))
         with gr.Row():
             network_dim_wan = gr.Number(label="Network Dim (2-128) / 网络维度", value=wan_training_settings.get("network_dim", 32), precision=0)
+            gradient_accumulation_steps_wan = gr.Number(label="Gradient Accumulation Steps / 梯度累积步数", value=wan_training_settings.get("gradient_accumulation_steps", 1), precision=0)
+        with gr.Row():
             timestep_sampling_input = gr.Textbox(label="Timestep Sampling / 时间步采样", value=wan_training_settings.get("timestep_sampling", "shift"))
             discrete_flow_shift_input = gr.Number(label="Discrete Flow Shift / 离散流移位", value=wan_training_settings.get("discrete_flow_shift", 3.0), precision=1)
         with gr.Row():
@@ -1150,6 +1192,7 @@ with gr.Blocks() as demo:
             output_name_wan = gr.Textbox(label="Output Name / 输出名称", placeholder="wan_lora", value=wan_training_settings.get("output_name", "wan_lora"))
         with gr.Row():
             save_every_n_epochs_wan = gr.Number(label="Save Every N Epochs / 每N个轮次保存一次", value=wan_training_settings.get("save_every_n_epochs", 1), precision=0)
+            save_every_n_steps_wan = gr.Number(label="Save Every N Steps / 每N步保存一次", value=wan_training_settings.get("save_every_n_steps", 0), precision=0)
         with gr.Row():
             use_network_weights_wan = gr.Checkbox(label="Continue Training From Existing Weights / 从已有权重继续训练", value=wan_training_settings.get("use_network_weights", False))
             network_weights_path_wan = gr.Textbox(label="Weights File Path / 权重文件路径", placeholder="Input weights file path / 请输入权重文件路径", value=wan_training_settings.get("network_weights_path", ""), visible=wan_training_settings.get("use_network_weights", False))
@@ -1189,8 +1232,8 @@ with gr.Blocks() as demo:
                 dataset_config_file_wan, dataset_config_text_wan,
                 task_dropdown, dit_weights_path_wan,
                 max_train_epochs_wan, learning_rate_wan, network_dim_wan,
-                enable_low_vram_wan, blocks_to_swap_wan,
-                output_dir_wan, output_name_wan, save_every_n_epochs_wan,
+                gradient_accumulation_steps_wan, enable_low_vram_wan, blocks_to_swap_wan,
+                output_dir_wan, output_name_wan, save_every_n_epochs_wan, save_every_n_steps_wan,
                 use_network_weights_wan, network_weights_path_wan,
                 use_clip_wan, clip_model_path_wan,
                 timestep_sampling_input, discrete_flow_shift_input,
@@ -1228,6 +1271,7 @@ with gr.Blocks() as demo:
             learning_rate_fpack = gr.Textbox(label="Learning Rate (e.g. 2e-4) / 学习率", value=fpack_training_settings.get("learning_rate", "2e-4"))
             network_dim_fpack = gr.Number(label="Network Dim (2-128) / 网络维度", value=fpack_training_settings.get("network_dim", 32), precision=0)
         with gr.Row():
+            gradient_accumulation_steps_fpack = gr.Number(label="Gradient Accumulation Steps / 梯度累积步数", value=fpack_training_settings.get("gradient_accumulation_steps", 1), precision=0)
             enable_low_vram_fpack = gr.Checkbox(label="Enable Low VRAM Mode / 启用低显存模式", value=fpack_training_settings.get("enable_low_vram", False))
             blocks_to_swap_fpack = gr.Number(label="Blocks to Swap (20-36, even) / 交换块数(20-36，双数)", value=fpack_training_settings.get("blocks_to_swap", 20), precision=0, visible=fpack_training_settings.get("enable_low_vram", False))
             split_attn = gr.Checkbox(label="Enable Split Attention (For batch size > 1) / 启用分割注意力(用于批量大小>1)", value=fpack_training_settings.get("split_attn", False))
@@ -1239,6 +1283,7 @@ with gr.Blocks() as demo:
             output_name_fpack = gr.Textbox(label="Output Name / 输出名称", placeholder="fpack_lora", value=fpack_training_settings.get("output_name", "fpack_lora"))
         with gr.Row():
             save_every_n_epochs_fpack = gr.Number(label="Save Every N Epochs / 每N个轮次保存一次", value=fpack_training_settings.get("save_every_n_epochs", 1), precision=0)
+            save_every_n_steps_fpack = gr.Number(label="Save Every N Steps / 每N步保存一次", value=fpack_training_settings.get("save_every_n_steps", 0), precision=0)
         with gr.Row():
             use_network_weights_fpack = gr.Checkbox(label="Continue Training From Existing Weights / 从已有权重继续训练", value=fpack_training_settings.get("use_network_weights", False))
             network_weights_path_fpack = gr.Textbox(label="Weights File Path / 权重文件路径", placeholder="Input weights file path / 请输入权重文件路径", value=fpack_training_settings.get("network_weights_path", ""), visible=fpack_training_settings.get("use_network_weights", False))
@@ -1251,6 +1296,8 @@ with gr.Blocks() as demo:
         def toggle_clip_input_fpack(checked):
             return gr.update(visible=checked)
         use_clip_fpack.change(toggle_clip_input_fpack, inputs=use_clip_fpack, outputs=clip_model_path_fpack_train)
+        use_f1_checkbox = gr.Checkbox(label="Enable F1 Mode (forward order) / 启用F1模式（顺序采样）", value=fpack_training_settings.get("use_f1", False))
+        use_one_frame_checkbox = gr.Checkbox(label="Use One Frame (--one_frame) / 使用单帧", value=fpack_training_settings.get("use_one_frame", False))
         with gr.Row():
             generate_samples_checkbox_fpack = gr.Checkbox(label="Generate Samples During Training? / 训练期间生成示例?", value=fpack_training_settings.get("generate_samples", False))
         with gr.Row():
@@ -1311,15 +1358,15 @@ with gr.Blocks() as demo:
             inputs=[
                 dataset_config_file_fpack_train, dataset_config_text_fpack_train,
                 dit_weights_path_fpack, max_train_epochs_fpack, learning_rate_fpack, network_dim_fpack,
-                enable_low_vram_fpack, blocks_to_swap_fpack, output_dir_fpack, output_name_fpack,
-                save_every_n_epochs_fpack, use_network_weights_fpack, network_weights_path_fpack,
+                gradient_accumulation_steps_fpack, enable_low_vram_fpack, blocks_to_swap_fpack, output_dir_fpack, output_name_fpack,
+                save_every_n_epochs_fpack, save_every_n_steps_fpack, use_network_weights_fpack, network_weights_path_fpack,
                 use_clip_fpack, clip_model_path_fpack_train, vae_path_fpack_train,
                 text_encoder1_path_fpack_train, text_encoder2_path_fpack_train, image_encoder_path_train,
                 generate_samples_checkbox_fpack, sample_every_n_epochs_fpack, sample_every_n_steps_fpack,
                 sample_prompt_text_fpack, sample_w_fpack, sample_h_fpack,
                 sample_frames_fpack, sample_seed_fpack, sample_steps_fpack,
                 custom_prompt_txt_checkbox_fpack, custom_prompt_path_fpack,
-                prompt_file_upload_fpack, split_attn
+                prompt_file_upload_fpack, use_f1_checkbox, use_one_frame_checkbox, split_attn
             ],
             outputs=fpack_train_output
         )
@@ -1350,7 +1397,7 @@ with gr.Blocks() as demo:
 7. **LoRA Conversion**：选择 `.safetensors` 文件后，输出文件名将自动添加 `_converted.safetensors` 后缀。
 8. **训练续训**：在训练页面中，启用"从已有权重继续训练"后，请确保权重文件路径正确。
 9. **FramePack 训练**：FramePack 仅支持 Image-to-Video (I2V) 训练，不支持 Text-to-Video (T2V)。
-10. **FramePack 预缓存**：默认使用 Inverted anti-drifting 采样方法，可以选择切换到 Vanilla sampling。
+10. **FramePack 预缓存**：默认使用 Inverted anti-drifting 采样方法，可以选择启用 F1 模式（顺序采样）。
 11. **FramePack 模型文件**：FramePack 需要额外的 Image Encoder (SigLIP) 模型，且使用特定的 DiT 模型。
 12. **FramePack 批量大小**：如果 batch size 大于 1，建议启用 Split Attention 选项。
     """)

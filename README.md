@@ -17,5 +17,12 @@ A user-friendly GUI for the **Kohya_ss musubi-tuner**, designed for easy use!
 
    ```bash
    .\python_embeded\python.exe train_gui.py
+   ```
 
-
+The GUI now supports FramePack **F1** mode (forward-order sampling) and the
+`--one_frame` training option. When caching data you can also enable
+`--one_frame_no_2x` or `--one_frame_no_4x` for finer control over the downsampling
+scale.
+You can configure checkpoint saving frequency either per-epoch or per-step using
+the new `Save Every N Steps` option on each training tab.
+Gradient accumulation steps can also be set for all training modes.
