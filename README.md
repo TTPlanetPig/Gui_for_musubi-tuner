@@ -27,8 +27,12 @@ You can configure checkpoint saving frequency either per-epoch or per-step using
 the new `Save Every N Steps` option on each training tab.
 Gradient accumulation steps can also be set for all training modes.
 
-The Wan training tab now supports **Wan2.2** features including optional
-high-noise DiT weights, a configurable timestep boundary, and the ability to
-offload the inactive DiT to CPU memory. You can also enable `Preserve
-Distribution Shape` to maintain the timestep distribution when training both
-high- and low-noise models simultaneously.
+Wan functionality has been expanded with separate tabs for **Wan2.1** and
+**Wan2.2**. Each version has its own pre-caching and training UI, and both now
+support `--one_frame` training. Wan2.2 exposes high-noise DiT weights,
+timestep boundary and CPU offloading options, along with the ability to
+preserve the timestep distribution shape.
+
+Additional training tabs are available for **Qwen-Image** and **FLUX.1
+Kontext**, allowing LoRA training for these architectures directly from the
+GUI.

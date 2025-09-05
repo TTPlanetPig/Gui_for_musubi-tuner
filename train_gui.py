@@ -195,7 +195,7 @@ def run_cache_commands(
     save_settings(existing_settings)
 
 # Wan2.1 预缓存：toml 文件上传，其它模型文件路径由用户手动输入
-def run_wan_cache_commands(
+def run_wan21_cache_commands(
     dataset_config_file: str,
     dataset_config_text: str,
     enable_low_memory: bool,
@@ -258,9 +258,9 @@ def run_wan_cache_commands(
     accumulated_main += "\n[INFO] Wan2.1 Text Encoder 输出预缓存已完成。\n"
     yield accumulated_main
 
-    # 保存 Wan2.1 预缓存设置（注意保存到 "wan_pre_caching" 以便后续加载）
+    # 保存 Wan2.1 预缓存设置（保存到 "wan21_pre_caching" 以便后续加载）
     wan_pre_caching_settings = {
-        "wan_pre_caching": {
+        "wan21_pre_caching": {
             "dataset_config_file": dataset_config_file,
             "dataset_config_text": dataset_config_text,
             "enable_low_memory": enable_low_memory,
@@ -273,6 +273,80 @@ def run_wan_cache_commands(
     }
     existing_settings = load_settings()
     existing_settings.update(wan_pre_caching_settings)
+    save_settings(existing_settings)
+
+# Wan2.2 预缓存：toml 文件上传，其它模型文件路径由用户手动输入
+def run_wan22_cache_commands(
+    dataset_config_file: str,
+    dataset_config_text: str,
+    enable_low_memory: bool,
+    skip_existing: bool,
+    vae_path: str,
+    t5_path: str
+) -> Generator[str, None, None]:
+    dataset_config = get_dataset_config(dataset_config_file, dataset_config_text)
+    python_executable = "./python_embeded/python.exe"
+
+    cache_latents_cmd = [
+        python_executable, "wan_cache_latents.py",
+        "--dataset_config", dataset_config,
+        "--vae", vae_path
+    ]
+    if enable_low_memory:
+        cache_latents_cmd.append("--vae_cache_cpu")
+    if skip_existing:
+        cache_latents_cmd.append("--skip_existing")
+
+    cache_text_encoder_cmd = [
+        python_executable, "wan_cache_text_encoder_outputs.py",
+        "--dataset_config", dataset_config,
+        "--t5", t5_path,
+        "--batch_size", "16"
+    ]
+    if enable_low_memory:
+        cache_text_encoder_cmd.append("--fp8_t5")
+
+    def run_and_stream_output(cmd):
+        accumulated = ""
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        running_processes["cache"] = process
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            accumulated += line
+            yield accumulated
+        return_code = process.wait()
+        running_processes["cache"] = None
+        if return_code != 0:
+            error_msg = f"\n[ERROR] 命令执行失败，返回码: {return_code}\n"
+            accumulated += error_msg
+            yield accumulated
+
+    accumulated_main = "\n[INFO] 开始运行 Wan2.2 Latent 预缓存 (wan_cache_latents.py)...\n\n"
+    yield accumulated_main
+    for content in run_and_stream_output(cache_latents_cmd):
+        yield content
+    accumulated_main += "\n[INFO] Wan2.2 Latent 预缓存已完成。\n"
+    yield accumulated_main
+
+    accumulated_main += "\n[INFO] 开始运行 Wan2.2 Text Encoder 输出预缓存 (wan_cache_text_encoder_outputs.py)...\n\n"
+    yield accumulated_main
+    for content in run_and_stream_output(cache_text_encoder_cmd):
+        yield content
+    accumulated_main += "\n[INFO] Wan2.2 Text Encoder 输出预缓存已完成。\n"
+    yield accumulated_main
+
+    wan22_pre_caching_settings = {
+        "wan22_pre_caching": {
+            "dataset_config_file": dataset_config_file,
+            "dataset_config_text": dataset_config_text,
+            "enable_low_memory": enable_low_memory,
+            "skip_existing": skip_existing,
+            "vae_path": vae_path,
+            "t5_path": t5_path
+        }
+    }
+    existing_settings = load_settings()
+    existing_settings.update(wan22_pre_caching_settings)
     save_settings(existing_settings)
 
 # FramePack 预缓存：toml 文件上传，其它模型文件路径由用户手动输入
@@ -587,6 +661,7 @@ def run_wan_training(
     timestep_boundary: float,
     offload_inactive_dit: bool,
     preserve_distribution_shape: bool,
+    use_one_frame: bool,
     max_train_epochs: int,
     learning_rate: str,
     network_dim: int,
@@ -616,7 +691,8 @@ def run_wan_training(
     custom_prompt_path: str,
     prompt_file_upload: str,
     sample_vae_path: str,
-    sample_t5_path: str
+    sample_t5_path: str,
+    settings_key: str
 ) -> Generator[str, None, None]:
     dataset_config = get_dataset_config(dataset_config_file, dataset_config_text)
     python_executable = "./python_embeded/python.exe"
@@ -666,6 +742,8 @@ def run_wan_training(
         command.extend(["--network_weights", network_weights_path.strip()])
     if use_clip and clip_model_path.strip():
         command.extend(["--clip", clip_model_path.strip()])
+    if use_one_frame:
+        command.append("--one_frame")
     if task.startswith("i2v"):
         command.append("--i2v")
     if generate_samples:
@@ -691,7 +769,7 @@ def run_wan_training(
         ])
 
     current_settings = {
-        "wan_training": {
+        settings_key: {
             "dataset_config_file": dataset_config_file,
             "dataset_config_text": dataset_config_text,
             "task": task,
@@ -700,6 +778,7 @@ def run_wan_training(
             "timestep_boundary": timestep_boundary,
             "offload_inactive_dit": offload_inactive_dit,
             "preserve_distribution_shape": preserve_distribution_shape,
+            "use_one_frame": use_one_frame,
             "max_train_epochs": max_train_epochs,
             "learning_rate": learning_rate,
             "network_dim": network_dim,
@@ -935,7 +1014,230 @@ def run_fpack_training(
     yield "\n[INFO] FramePack 训练命令执行完成。\n"
 
 #########################
-# 8. LoRA Conversion
+# 8. Qwen-Image 训练函数
+#########################
+
+def run_qwen_image_training(
+    dataset_config_file: str,
+    dataset_config_text: str,
+    dit_weights_path: str,
+    vae_path: str,
+    text_encoder_path: str,
+    max_train_epochs: int,
+    learning_rate: str,
+    network_dim: int,
+    gradient_accumulation_steps: int,
+    enable_low_vram: bool,
+    blocks_to_swap: int,
+    output_dir: str,
+    output_name: str,
+    save_every_n_epochs: int,
+    save_every_n_steps: int,
+    use_network_weights: bool,
+    network_weights_path: str,
+    edit_model: bool,
+    settings_key: str
+) -> Generator[str, None, None]:
+    dataset_config = get_dataset_config(dataset_config_file, dataset_config_text)
+    python_executable = "./python_embeded/python.exe"
+
+    command = [
+        python_executable, "-m", "accelerate.commands.launch",
+        "--num_cpu_threads_per_process", "1",
+        "--mixed_precision", "bf16",
+        "--gpu_ids", "0",
+        "qwen_image_train_network.py",
+        "--dit", dit_weights_path,
+        "--vae", vae_path,
+        "--text_encoder", text_encoder_path,
+        "--dataset_config", dataset_config,
+        "--sdpa",
+        "--mixed_precision", "bf16",
+        "--timestep_sampling", "shift",
+        "--weighting_scheme", "none",
+        "--discrete_flow_shift", "2.2",
+        "--optimizer_type", "adamw8bit",
+        "--learning_rate", learning_rate,
+        "--gradient_checkpointing",
+        f"--gradient_accumulation_steps={gradient_accumulation_steps}",
+        "--max_data_loader_n_workers", "2",
+        "--persistent_data_loader_workers",
+        "--network_module", "networks.lora_qwen_image",
+        "--network_dim", str(network_dim),
+        "--max_train_epochs", str(max_train_epochs),
+        "--save_every_n_epochs", str(save_every_n_epochs),
+        "--save_every_n_steps", str(save_every_n_steps),
+        "--seed", "42",
+        "--output_dir", output_dir,
+        "--output_name", output_name,
+    ]
+    if enable_low_vram:
+        command.extend(["--fp8_base", "--fp8_scaled", "--fp8_vl", "--blocks_to_swap", str(blocks_to_swap)])
+    if use_network_weights and network_weights_path.strip():
+        command.extend(["--network_weights", network_weights_path.strip()])
+    if edit_model:
+        command.append("--edit")
+
+    current_settings = {
+        settings_key: {
+            "dataset_config_file": dataset_config_file,
+            "dataset_config_text": dataset_config_text,
+            "dit_weights_path": dit_weights_path,
+            "vae_path": vae_path,
+            "text_encoder_path": text_encoder_path,
+            "max_train_epochs": max_train_epochs,
+            "learning_rate": learning_rate,
+            "network_dim": network_dim,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
+            "enable_low_vram": enable_low_vram,
+            "blocks_to_swap": blocks_to_swap,
+            "output_dir": output_dir,
+            "output_name": output_name,
+            "save_every_n_epochs": save_every_n_epochs,
+            "save_every_n_steps": save_every_n_steps,
+            "use_network_weights": use_network_weights,
+            "network_weights_path": network_weights_path,
+            "edit_model": edit_model,
+        }
+    }
+    existing_settings = load_settings()
+    existing_settings.update(current_settings)
+    save_settings(existing_settings)
+
+    def run_and_stream_output(cmd):
+        accumulated = ""
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        running_processes["train"] = process
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            accumulated += line
+            yield accumulated
+        return_code = process.wait()
+        running_processes["train"] = None
+        if return_code != 0:
+            error_msg = f"\n[ERROR] 命令执行失败，返回码: {return_code}\n"
+            accumulated += error_msg
+            yield accumulated
+
+    start_message = "[INFO] 开始运行 Qwen-Image 训练命令...\n\n"
+    yield start_message
+    for content in run_and_stream_output(command):
+        yield content
+    yield "\n[INFO] Qwen-Image 训练命令执行完成。\n"
+
+#########################
+# 9. FLUX Kontext 训练函数
+#########################
+
+def run_kontext_training(
+    dataset_config_file: str,
+    dataset_config_text: str,
+    dit_weights_path: str,
+    vae_path: str,
+    text_encoder1_path: str,
+    text_encoder2_path: str,
+    max_train_epochs: int,
+    learning_rate: str,
+    network_dim: int,
+    gradient_accumulation_steps: int,
+    enable_low_vram: bool,
+    blocks_to_swap: int,
+    output_dir: str,
+    output_name: str,
+    save_every_n_epochs: int,
+    save_every_n_steps: int,
+    use_network_weights: bool,
+    network_weights_path: str,
+    settings_key: str
+) -> Generator[str, None, None]:
+    dataset_config = get_dataset_config(dataset_config_file, dataset_config_text)
+    python_executable = "./python_embeded/python.exe"
+
+    command = [
+        python_executable, "-m", "accelerate.commands.launch",
+        "--num_cpu_threads_per_process", "1",
+        "--mixed_precision", "bf16",
+        "--gpu_ids", "0",
+        "flux_kontext_train_network.py",
+        "--dit", dit_weights_path,
+        "--vae", vae_path,
+        "--text_encoder1", text_encoder1_path,
+        "--text_encoder2", text_encoder2_path,
+        "--dataset_config", dataset_config,
+        "--sdpa",
+        "--mixed_precision", "bf16",
+        "--timestep_sampling", "flux_shift",
+        "--weighting_scheme", "none",
+        "--optimizer_type", "adamw8bit",
+        "--learning_rate", learning_rate,
+        "--gradient_checkpointing",
+        f"--gradient_accumulation_steps={gradient_accumulation_steps}",
+        "--max_data_loader_n_workers", "2",
+        "--persistent_data_loader_workers",
+        "--network_module", "networks.lora_flux",
+        "--network_dim", str(network_dim),
+        "--max_train_epochs", str(max_train_epochs),
+        "--save_every_n_epochs", str(save_every_n_epochs),
+        "--save_every_n_steps", str(save_every_n_steps),
+        "--seed", "42",
+        "--output_dir", output_dir,
+        "--output_name", output_name,
+    ]
+    if enable_low_vram:
+        command.extend(["--fp8", "--fp8_scaled", "--fp8_t5", "--blocks_to_swap", str(blocks_to_swap)])
+    if use_network_weights and network_weights_path.strip():
+        command.extend(["--network_weights", network_weights_path.strip()])
+
+    current_settings = {
+        settings_key: {
+            "dataset_config_file": dataset_config_file,
+            "dataset_config_text": dataset_config_text,
+            "dit_weights_path": dit_weights_path,
+            "vae_path": vae_path,
+            "text_encoder1_path": text_encoder1_path,
+            "text_encoder2_path": text_encoder2_path,
+            "max_train_epochs": max_train_epochs,
+            "learning_rate": learning_rate,
+            "network_dim": network_dim,
+            "gradient_accumulation_steps": gradient_accumulation_steps,
+            "enable_low_vram": enable_low_vram,
+            "blocks_to_swap": blocks_to_swap,
+            "output_dir": output_dir,
+            "output_name": output_name,
+            "save_every_n_epochs": save_every_n_epochs,
+            "save_every_n_steps": save_every_n_steps,
+            "use_network_weights": use_network_weights,
+            "network_weights_path": network_weights_path,
+        }
+    }
+    existing_settings = load_settings()
+    existing_settings.update(current_settings)
+    save_settings(existing_settings)
+
+    def run_and_stream_output(cmd):
+        accumulated = ""
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        running_processes["train"] = process
+        for line in process.stdout:
+            print(line, end="", flush=True)
+            accumulated += line
+            yield accumulated
+        return_code = process.wait()
+        running_processes["train"] = None
+        if return_code != 0:
+            error_msg = f"\n[ERROR] 命令执行失败，返回码: {return_code}\n"
+            accumulated += error_msg
+            yield accumulated
+
+    start_message = "[INFO] 开始运行 FLUX Kontext 训练命令...\n\n"
+    yield start_message
+    for content in run_and_stream_output(command):
+        yield content
+    yield "\n[INFO] FLUX Kontext 训练命令执行完成。\n"
+
+
+#########################
+# 10. LoRA Conversion
 #########################
 
 def run_lora_conversion(lora_file_path: str, output_dir: str) -> Generator[str, None, None]:
@@ -979,12 +1281,16 @@ def run_lora_conversion(lora_file_path: str, output_dir: str) -> Generator[str, 
 # 注意：toml 文件上传功能保留，其它模型文件及 prompt_file.txt 上传由用户手动输入或上传（上传的 prompt_file.txt 会优先使用）
 settings = load_settings()
 pre_caching_settings = settings.get("pre_caching", {})
-# 新增：加载 Wan2.1 预缓存的设置
-wan_pre_caching_settings = settings.get("wan_pre_caching", {})
+# 新增：加载 Wan2.1/Wan2.2 预缓存的设置
+wan21_pre_caching_settings = settings.get("wan21_pre_caching", {})
+wan22_pre_caching_settings = settings.get("wan22_pre_caching", {})
 # 新增：加载 FramePack 预缓存的设置
 fpack_pre_caching_settings = settings.get("fpack_pre_caching", {})
 training_settings = settings.get("training", {})
-wan_training_settings = settings.get("wan_training", {})
+wan21_training_settings = settings.get("wan21_training", {})
+wan22_training_settings = settings.get("wan22_training", {})
+qwen_training_settings = settings.get("qwen_training", {})
+kontext_training_settings = settings.get("kontext_training", {})
 # 新增：加载 FramePack 训练的设置
 fpack_training_settings = settings.get("fpack_training", {})
 
@@ -1029,30 +1335,53 @@ with gr.Blocks() as demo:
             with gr.Tab("Wan2.1 Pre-caching / Wan2.1预缓存"):
                 gr.Markdown("## Wan2.1 Latent and Text Encoder Output Pre-caching / Wan2.1潜空间和文本编码器输出预缓存")
                 with gr.Row():
-                    dataset_config_file_wan = gr.File(label="Upload dataset_config (toml) / 上传数据集配置文件", file_count="single", file_types=[".toml"], type="filepath")
-                    dataset_config_text_wan = gr.Textbox(label="Or input toml path / 或输入toml文件路径", placeholder="Example: K:/ai_software/config.toml", value=wan_pre_caching_settings.get("dataset_config_text", ""))
-                enable_low_memory_wan = gr.Checkbox(label="Enable Low Memory Mode / 启用低内存模式", value=wan_pre_caching_settings.get("enable_low_memory", False))
-                skip_existing_wan = gr.Checkbox(label="Skip Existing Cache Files (--skip_existing) / 跳过已存在的缓存文件", value=wan_pre_caching_settings.get("skip_existing", False))
+                    dataset_config_file_wan21 = gr.File(label="Upload dataset_config (toml) / 上传数据集配置文件", file_count="single", file_types=[".toml"], type="filepath")
+                    dataset_config_text_wan21 = gr.Textbox(label="Or input toml path / 或输入toml文件路径", placeholder="Example: K:/ai_software/config.toml", value=wan21_pre_caching_settings.get("dataset_config_text", ""))
+                enable_low_memory_wan21 = gr.Checkbox(label="Enable Low Memory Mode / 启用低内存模式", value=wan21_pre_caching_settings.get("enable_low_memory", False))
+                skip_existing_wan21 = gr.Checkbox(label="Skip Existing Cache Files (--skip_existing) / 跳过已存在的缓存文件", value=wan21_pre_caching_settings.get("skip_existing", False))
                 with gr.Row():
-                    vae_path_wan = gr.Textbox(label="Wan2.1 VAE File Path / Wan2.1 VAE文件路径", placeholder="Example: K:/models/wan2.1/vae.safetensors", value=wan_pre_caching_settings.get("vae_path", ""))
-                    t5_path = gr.Textbox(label="T5 Model Path / T5模型路径", placeholder="Example: K:/models/wan2.1/t5.pth", value=wan_pre_caching_settings.get("t5_path", ""))
+                    vae_path_wan21 = gr.Textbox(label="Wan2.1 VAE File Path / Wan2.1 VAE文件路径", placeholder="Example: K:/models/wan2.1/vae.safetensors", value=wan21_pre_caching_settings.get("vae_path", ""))
+                    t5_path_wan21 = gr.Textbox(label="T5 Model Path / T5模型路径", placeholder="Example: K:/models/wan2.1/t5.pth", value=wan21_pre_caching_settings.get("t5_path", ""))
                 with gr.Row():
-                    use_clip_checkbox_wan = gr.Checkbox(label="Use CLIP Model (--clip) / 使用CLIP模型", value=wan_pre_caching_settings.get("use_clip", False))
-                    clip_model_path_wan = gr.Textbox(label="Wan2.1 CLIP Model Path / Wan2.1 CLIP模型路径", placeholder="Example: K:/models/wan2.1/clip.pth", visible=False, value=wan_pre_caching_settings.get("clip_model_path", ""))
-                def toggle_clip_wan(checked):
+                    use_clip_checkbox_wan21 = gr.Checkbox(label="Use CLIP Model (--clip) / 使用CLIP模型", value=wan21_pre_caching_settings.get("use_clip", False))
+                    clip_model_path_wan21 = gr.Textbox(label="Wan2.1 CLIP Model Path / Wan2.1 CLIP模型路径", placeholder="Example: K:/models/wan2.1/clip.pth", visible=False, value=wan21_pre_caching_settings.get("clip_model_path", ""))
+                def toggle_clip_wan21(checked):
                     return gr.update(visible=checked)
-                use_clip_checkbox_wan.change(toggle_clip_wan, inputs=use_clip_checkbox_wan, outputs=clip_model_path_wan)
+                use_clip_checkbox_wan21.change(toggle_clip_wan21, inputs=use_clip_checkbox_wan21, outputs=clip_model_path_wan21)
                 with gr.Row():
-                    run_cache_button_wan = gr.Button("Run Wan2.1 Pre-caching / 运行Wan2.1预缓存")
-                    stop_cache_button_wan = gr.Button("Stop Pre-caching / 停止预缓存")
-                cache_output_wan = gr.Textbox(label="Wan2.1 Pre-caching Output / Wan2.1预缓存输出", lines=20, interactive=False)
-                run_cache_button_wan.click(
-                    fn=run_wan_cache_commands,
-                    inputs=[dataset_config_file_wan, dataset_config_text_wan, enable_low_memory_wan, skip_existing_wan,
-                            use_clip_checkbox_wan, clip_model_path_wan, vae_path_wan, t5_path],
-                    outputs=cache_output_wan
+                    run_cache_button_wan21 = gr.Button("Run Wan2.1 Pre-caching / 运行Wan2.1预缓存")
+                    stop_cache_button_wan21 = gr.Button("Stop Pre-caching / 停止预缓存")
+                cache_output_wan21 = gr.Textbox(label="Wan2.1 Pre-caching Output / Wan2.1预缓存输出", lines=20, interactive=False)
+                run_cache_button_wan21.click(
+                    fn=run_wan21_cache_commands,
+                    inputs=[dataset_config_file_wan21, dataset_config_text_wan21, enable_low_memory_wan21, skip_existing_wan21,
+                            use_clip_checkbox_wan21, clip_model_path_wan21, vae_path_wan21, t5_path_wan21],
+                    outputs=cache_output_wan21
                 )
-                stop_cache_button_wan.click(fn=stop_caching, inputs=None, outputs=cache_output_wan)
+                stop_cache_button_wan21.click(fn=stop_caching, inputs=None, outputs=cache_output_wan21)
+
+            # Wan2.2 预缓存子标签
+            with gr.Tab("Wan2.2 Pre-caching / Wan2.2预缓存"):
+                gr.Markdown("## Wan2.2 Latent and Text Encoder Output Pre-caching / Wan2.2潜空间和文本编码器输出预缓存")
+                with gr.Row():
+                    dataset_config_file_wan22 = gr.File(label="Upload dataset_config (toml) / 上传数据集配置文件", file_count="single", file_types=[".toml"], type="filepath")
+                    dataset_config_text_wan22 = gr.Textbox(label="Or input toml path / 或输入toml文件路径", placeholder="Example: K:/ai_software/config.toml", value=wan22_pre_caching_settings.get("dataset_config_text", ""))
+                enable_low_memory_wan22 = gr.Checkbox(label="Enable Low Memory Mode / 启用低内存模式", value=wan22_pre_caching_settings.get("enable_low_memory", False))
+                skip_existing_wan22 = gr.Checkbox(label="Skip Existing Cache Files (--skip_existing) / 跳过已存在的缓存文件", value=wan22_pre_caching_settings.get("skip_existing", False))
+                with gr.Row():
+                    vae_path_wan22 = gr.Textbox(label="Wan2.2 VAE File Path / Wan2.2 VAE文件路径", placeholder="Example: K:/models/wan2.2/vae.safetensors", value=wan22_pre_caching_settings.get("vae_path", ""))
+                    t5_path_wan22 = gr.Textbox(label="T5 Model Path / T5模型路径", placeholder="Example: K:/models/wan2.2/t5.pth", value=wan22_pre_caching_settings.get("t5_path", ""))
+                with gr.Row():
+                    run_cache_button_wan22 = gr.Button("Run Wan2.2 Pre-caching / 运行Wan2.2预缓存")
+                    stop_cache_button_wan22 = gr.Button("Stop Pre-caching / 停止预缓存")
+                cache_output_wan22 = gr.Textbox(label="Wan2.2 Pre-caching Output / Wan2.2预缓存输出", lines=20, interactive=False)
+                run_cache_button_wan22.click(
+                    fn=run_wan22_cache_commands,
+                    inputs=[dataset_config_file_wan22, dataset_config_text_wan22, enable_low_memory_wan22, skip_existing_wan22,
+                            vae_path_wan22, t5_path_wan22],
+                    outputs=cache_output_wan22
+                )
+                stop_cache_button_wan22.click(fn=stop_caching, inputs=None, outputs=cache_output_wan22)
             
             # FramePack 预缓存子标签 (新增)
             with gr.Tab("FramePack Pre-caching / FramePack预缓存"):
@@ -1181,76 +1510,75 @@ with gr.Blocks() as demo:
         stop_train_button.click(fn=stop_training, inputs=None, outputs=train_output)
 
     ########################################
-    # (3) Wan2 Training / 训练 Wan2 页面
+    # (3) Wan2.1 Training
     ########################################
-    with gr.Tab("Training Wan2.1/2.2 / Wan2.1/2.2训练"):
-        gr.Markdown("## Wan2.1/2.2 Network Training / Wan2.1/2.2网络训练")
+    with gr.Tab("Training Wan2.1 / Wan2.1训练"):
+        gr.Markdown("## Wan2.1 Network Training / Wan2.1网络训练")
         with gr.Row():
-            dataset_config_file_wan = gr.File(label="Upload dataset_config (toml) / 上传数据集配置文件", file_count="single", file_types=[".toml"], type="filepath")
-            dataset_config_text_wan = gr.Textbox(label="Or input toml path / 或输入toml文件路径", placeholder="Example: K:/ai_software/config.toml", value=wan_training_settings.get("dataset_config_text", ""))
+            dataset_config_file_wan21 = gr.File(label="Upload dataset_config (toml) / 上传数据集配置文件", file_count="single", file_types=[".toml"], type="filepath")
+            dataset_config_text_wan21 = gr.Textbox(label="Or input toml path / 或输入toml文件路径", placeholder="Example: K:/ai_software/config.toml", value=wan21_training_settings.get("dataset_config_text", ""))
         with gr.Row():
-            task_dropdown = gr.Dropdown(label="Task / 任务", choices=["t2v-1.3B", "t2v-14B", "i2v-14B", "t2i-14B", "t2v-A14B", "i2v-A14B"], value=wan_training_settings.get("task", "t2v-1.3B"))
-            dit_weights_path_wan = gr.Textbox(label="Low-Noise DiT Path (--dit) / 低噪声DiT权重路径", placeholder="Example: K:/models/wan/dit_low.safetensors", value=wan_training_settings.get("dit_weights_path", ""))
+            task_dropdown_wan21 = gr.Dropdown(label="Task / 任务", choices=["t2v-1.3B", "t2v-14B", "i2v-14B", "t2i-14B", "t2v-1.3B-FC", "t2v-14B-FC", "i2v-14B-FC"], value=wan21_training_settings.get("task", "t2v-1.3B"))
+            dit_weights_path_wan21 = gr.Textbox(label="DiT Path (--dit) / DiT权重路径", placeholder="Example: K:/models/wan/dit_low.safetensors", value=wan21_training_settings.get("dit_weights_path", ""))
+        # Hidden placeholders for 2.1
+        dit_high_noise_path_wan21 = gr.Textbox(value="", visible=False)
+        timestep_boundary_wan21 = gr.Number(value=0.9, visible=False)
+        offload_inactive_dit_wan21 = gr.Checkbox(value=False, visible=False)
+        preserve_distribution_shape_wan21 = gr.Checkbox(value=False, visible=False)
+        use_one_frame_checkbox_wan21 = gr.Checkbox(label="Use One Frame (--one_frame) / 使用单帧", value=wan21_training_settings.get("use_one_frame", False))
         with gr.Row():
-            dit_high_noise_path_wan = gr.Textbox(label="High-Noise DiT Path (--dit_high_noise) / 高噪声DiT权重路径", placeholder="Example: K:/models/wan/dit_high.safetensors", value=wan_training_settings.get("dit_high_noise_path", ""))
-            timestep_boundary_wan = gr.Number(label="Timestep Boundary / 时间步界限", value=wan_training_settings.get("timestep_boundary", 0.9), precision=3)
+            max_train_epochs_wan21 = gr.Number(label="Training Epochs (>=2) / 训练轮数", value=wan21_training_settings.get("max_train_epochs", 16), precision=0)
+            learning_rate_wan21 = gr.Textbox(label="Learning Rate (e.g. 2e-4) / 学习率", value=wan21_training_settings.get("learning_rate", "2e-4"))
         with gr.Row():
-            max_train_epochs_wan = gr.Number(label="Training Epochs (>=2) / 训练轮数", value=wan_training_settings.get("max_train_epochs", 16), precision=0)
-            learning_rate_wan = gr.Textbox(label="Learning Rate (e.g. 2e-4) / 学习率", value=wan_training_settings.get("learning_rate", "2e-4"))
+            network_dim_wan21 = gr.Number(label="Network Dim (2-128) / 网络维度", value=wan21_training_settings.get("network_dim", 32), precision=0)
+            gradient_accumulation_steps_wan21 = gr.Number(label="Gradient Accumulation Steps / 梯度累积步数", value=wan21_training_settings.get("gradient_accumulation_steps", 1), precision=0)
         with gr.Row():
-            network_dim_wan = gr.Number(label="Network Dim (2-128) / 网络维度", value=wan_training_settings.get("network_dim", 32), precision=0)
-            gradient_accumulation_steps_wan = gr.Number(label="Gradient Accumulation Steps / 梯度累积步数", value=wan_training_settings.get("gradient_accumulation_steps", 1), precision=0)
-        with gr.Row():
-            timestep_sampling_input = gr.Textbox(label="Timestep Sampling / 时间步采样", value=wan_training_settings.get("timestep_sampling", "shift"))
-            discrete_flow_shift_input = gr.Number(label="Discrete Flow Shift / 离散流移位", value=wan_training_settings.get("discrete_flow_shift", 3.0), precision=1)
-        with gr.Row():
-            offload_inactive_dit_wan = gr.Checkbox(label="Offload Inactive DiT / 将未使用DiT移至CPU", value=wan_training_settings.get("offload_inactive_dit", False))
-            preserve_distribution_shape_wan = gr.Checkbox(label="Preserve Distribution Shape / 保持分布形状", value=wan_training_settings.get("preserve_distribution_shape", False))
-            enable_low_vram_wan = gr.Checkbox(label="Enable Low VRAM Mode / 启用低显存模式", value=wan_training_settings.get("enable_low_vram", False))
-            blocks_to_swap_wan = gr.Number(label="Blocks to Swap (20-36, even) / 交换块数(20-36，双数)", value=wan_training_settings.get("blocks_to_swap", 20), precision=0, visible=wan_training_settings.get("enable_low_vram", False))
-        def toggle_blocks_swap_wan(checked):
+            timestep_sampling_input_wan21 = gr.Textbox(label="Timestep Sampling / 时间步采样", value=wan21_training_settings.get("timestep_sampling", "shift"))
+            discrete_flow_shift_input_wan21 = gr.Number(label="Discrete Flow Shift / 离散流移位", value=wan21_training_settings.get("discrete_flow_shift", 3.0), precision=1)
+        enable_low_vram_wan21 = gr.Checkbox(label="Enable Low VRAM Mode / 启用低显存模式", value=wan21_training_settings.get("enable_low_vram", False))
+        blocks_to_swap_wan21 = gr.Number(label="Blocks to Swap (20-36, even) / 交换块数(20-36，双数)", value=wan21_training_settings.get("blocks_to_swap", 20), precision=0, visible=wan21_training_settings.get("enable_low_vram", False))
+        def toggle_blocks_swap_wan21(checked):
             return gr.update(visible=checked)
-        enable_low_vram_wan.change(toggle_blocks_swap_wan, inputs=enable_low_vram_wan, outputs=blocks_to_swap_wan)
+        enable_low_vram_wan21.change(toggle_blocks_swap_wan21, inputs=enable_low_vram_wan21, outputs=blocks_to_swap_wan21)
         with gr.Row():
-            output_dir_wan = gr.Textbox(label="Output Directory / 输出目录", placeholder="./output", value=wan_training_settings.get("output_dir", "./output"))
-            output_name_wan = gr.Textbox(label="Output Name / 输出名称", placeholder="wan_lora", value=wan_training_settings.get("output_name", "wan_lora"))
+            output_dir_wan21 = gr.Textbox(label="Output Directory / 输出目录", placeholder="./output", value=wan21_training_settings.get("output_dir", "./output"))
+            output_name_wan21 = gr.Textbox(label="Output Name / 输出名称", placeholder="wan_lora", value=wan21_training_settings.get("output_name", "wan_lora"))
         with gr.Row():
-            save_every_n_epochs_wan = gr.Number(label="Save Every N Epochs / 每N个轮次保存一次", value=wan_training_settings.get("save_every_n_epochs", 1), precision=0)
-            save_every_n_steps_wan = gr.Number(label="Save Every N Steps / 每N步保存一次", value=wan_training_settings.get("save_every_n_steps", 0), precision=0)
+            save_every_n_epochs_wan21 = gr.Number(label="Save Every N Epochs / 每N个轮次保存一次", value=wan21_training_settings.get("save_every_n_epochs", 1), precision=0)
+            save_every_n_steps_wan21 = gr.Number(label="Save Every N Steps / 每N步保存一次", value=wan21_training_settings.get("save_every_n_steps", 0), precision=0)
         with gr.Row():
-            use_network_weights_wan = gr.Checkbox(label="Continue Training From Existing Weights / 从已有权重继续训练", value=wan_training_settings.get("use_network_weights", False))
-            network_weights_path_wan = gr.Textbox(label="Weights File Path / 权重文件路径", placeholder="Input weights file path / 请输入权重文件路径", value=wan_training_settings.get("network_weights_path", ""), visible=wan_training_settings.get("use_network_weights", False))
-        def toggle_network_weights_input_wan(checked):
+            use_network_weights_wan21 = gr.Checkbox(label="Continue Training From Existing Weights / 从已有权重继续训练", value=wan21_training_settings.get("use_network_weights", False))
+            network_weights_path_wan21 = gr.Textbox(label="Weights File Path / 权重文件路径", placeholder="Input weights file path / 请输入权重文件路径", value=wan21_training_settings.get("network_weights_path", ""), visible=wan21_training_settings.get("use_network_weights", False))
+        def toggle_network_weights_input_wan21(checked):
             return gr.update(visible=checked)
-        use_network_weights_wan.change(toggle_network_weights_input_wan, inputs=use_network_weights_wan, outputs=network_weights_path_wan)
+        use_network_weights_wan21.change(toggle_network_weights_input_wan21, inputs=use_network_weights_wan21, outputs=network_weights_path_wan21)
         with gr.Row():
-            use_clip_wan = gr.Checkbox(label="Use CLIP Model (--clip) (For I2V) / 使用CLIP模型（用于I2V）", value=wan_training_settings.get("use_clip", False))
-            clip_model_path_wan = gr.Textbox(label="CLIP Model Path / CLIP模型路径", placeholder="Example: K:/models/wan2.1/clip.pth", value=wan_training_settings.get("clip_model_path", ""), visible=wan_training_settings.get("use_clip", False))
-        def toggle_clip_input(checked):
+            use_clip_wan21 = gr.Checkbox(label="Use CLIP Model (--clip) (For I2V) / 使用CLIP模型（用于I2V）", value=wan21_training_settings.get("use_clip", False))
+            clip_model_path_wan21 = gr.Textbox(label="CLIP Model Path / CLIP模型路径", placeholder="Example: K:/models/wan2.1/clip.pth", value=wan21_training_settings.get("clip_model_path", ""), visible=wan21_training_settings.get("use_clip", False))
+        def toggle_clip_input_wan21(checked):
             return gr.update(visible=checked)
-        use_clip_wan.change(toggle_clip_input, inputs=use_clip_wan, outputs=clip_model_path_wan)
+        use_clip_wan21.change(toggle_clip_input_wan21, inputs=use_clip_wan21, outputs=clip_model_path_wan21)
         with gr.Row():
-            generate_samples_checkbox_wan = gr.Checkbox(label="Generate Samples During Training? / 训练期间生成示例?", value=wan_training_settings.get("generate_samples", False))
+            generate_samples_checkbox_wan21 = gr.Checkbox(label="Generate Samples During Training? / 训练期间生成示例?", value=wan21_training_settings.get("generate_samples", False))
         with gr.Row():
-            sample_every_n_epochs_wan = gr.Number(label="Sample Every N Epochs / 每N个轮次采样一次", value=wan_training_settings.get("sample_every_n_epochs", 1), precision=0, visible=wan_training_settings.get("generate_samples", False))
-            sample_every_n_steps_wan = gr.Number(label="Sample Every N Steps / 每N步采样一次", value=wan_training_settings.get("sample_every_n_steps", 1000), precision=0, visible=wan_training_settings.get("generate_samples", False))
-        sample_prompt_text_wan = gr.Textbox(label="Prompt Text / 提示文本", value=wan_training_settings.get("sample_prompt_text", "A beautiful landscape in Wan style."), visible=wan_training_settings.get("generate_samples", False))
+            sample_every_n_epochs_wan21 = gr.Number(label="Sample Every N Epochs / 每N个轮次采样一次", value=wan21_training_settings.get("sample_every_n_epochs", 1), precision=0, visible=wan21_training_settings.get("generate_samples", False))
+            sample_every_n_steps_wan21 = gr.Number(label="Sample Every N Steps / 每N步采样一次", value=wan21_training_settings.get("sample_every_n_steps", 1000), precision=0, visible=wan21_training_settings.get("generate_samples", False))
+        sample_prompt_text_wan21 = gr.Textbox(label="Prompt Text / 提示文本", value=wan21_training_settings.get("sample_prompt_text", "A beautiful landscape in Wan style."), visible=wan21_training_settings.get("generate_samples", False))
         with gr.Row():
-            sample_w_wan = gr.Number(label="Width (w) / 宽度", value=wan_training_settings.get("sample_w", 832), precision=0, visible=wan_training_settings.get("generate_samples", False))
-            sample_h_wan = gr.Number(label="Height (h) / 高度", value=wan_training_settings.get("sample_h", 480), precision=0, visible=wan_training_settings.get("generate_samples", False))
-            sample_frames_wan = gr.Number(label="Frames (f) / 帧数", value=wan_training_settings.get("sample_frames", 81), precision=0, visible=wan_training_settings.get("generate_samples", False))
+            sample_w_wan21 = gr.Number(label="Width (w) / 宽度", value=wan21_training_settings.get("sample_w", 832), precision=0, visible=wan21_training_settings.get("generate_samples", False))
+            sample_h_wan21 = gr.Number(label="Height (h) / 高度", value=wan21_training_settings.get("sample_h", 480), precision=0, visible=wan21_training_settings.get("generate_samples", False))
+            sample_frames_wan21 = gr.Number(label="Frames (f) / 帧数", value=wan21_training_settings.get("sample_frames", 81), precision=0, visible=wan21_training_settings.get("generate_samples", False))
         with gr.Row():
-            sample_seed_wan = gr.Number(label="Seed (d) / 种子", value=wan_training_settings.get("sample_seed", 42), precision=0, visible=wan_training_settings.get("generate_samples", False))
-            sample_steps_wan = gr.Number(label="Steps (s) / 步数", value=wan_training_settings.get("sample_steps", 20), precision=0, visible=wan_training_settings.get("generate_samples", False))
-        custom_prompt_txt_checkbox_wan = gr.Checkbox(label="Use Custom Prompt File? / 使用自定义提示文件?", value=wan_training_settings.get("custom_prompt_txt", False), visible=wan_training_settings.get("generate_samples", False))
-        custom_prompt_path_wan = gr.Textbox(label="Custom Prompt File Path / 自定义提示文件路径", placeholder="Input prompt file path / 请输入提示文件路径", value=wan_training_settings.get("custom_prompt_path", ""), visible=wan_training_settings.get("generate_samples", False) and wan_training_settings.get("custom_prompt_txt", False))
-        # 增加上传 prompt_file.txt 的控件
-        prompt_file_upload_wan = gr.File(label="Upload prompt_file.txt (Optional) / 上传提示文件(可选)", file_count="single", file_types=[".txt"], type="filepath", visible=wan_training_settings.get("generate_samples", False))
-        with gr.Row(visible=wan_training_settings.get("generate_samples", False)):
-            sample_vae_path_wan = gr.Textbox(label="VAE Path (--vae) / VAE文件路径", placeholder="例如：K:/models/wan2.1/vae.safetensors", value=wan_training_settings.get("sample_vae_path", ""))
-            sample_t5_path_wan = gr.Textbox(label="T5 Path (--t5) / T5模型路径", placeholder="例如：K:/models/wan2.1/t5.pth", value=wan_training_settings.get("sample_t5_path", ""))
+            sample_seed_wan21 = gr.Number(label="Seed (d) / 种子", value=wan21_training_settings.get("sample_seed", 42), precision=0, visible=wan21_training_settings.get("generate_samples", False))
+            sample_steps_wan21 = gr.Number(label="Steps (s) / 步数", value=wan21_training_settings.get("sample_steps", 20), precision=0, visible=wan21_training_settings.get("generate_samples", False))
+        custom_prompt_txt_checkbox_wan21 = gr.Checkbox(label="Use Custom Prompt File? / 使用自定义提示文件?", value=wan21_training_settings.get("custom_prompt_txt", False), visible=wan21_training_settings.get("generate_samples", False))
+        custom_prompt_path_wan21 = gr.Textbox(label="Custom Prompt File Path / 自定义提示文件路径", placeholder="Input prompt file path / 请输入提示文件路径", value=wan21_training_settings.get("custom_prompt_path", ""), visible=wan21_training_settings.get("generate_samples", False) and wan21_training_settings.get("custom_prompt_txt", False))
+        prompt_file_upload_wan21 = gr.File(label="Upload prompt_file.txt (Optional) / 上传提示文件(可选)", file_count="single", file_types=[".txt"], type="filepath", visible=wan21_training_settings.get("generate_samples", False))
+        with gr.Row(visible=wan21_training_settings.get("generate_samples", False)):
+            sample_vae_path_wan21 = gr.Textbox(label="VAE Path (--vae) / VAE文件路径", placeholder="例如：K:/models/wan2.1/vae.safetensors", value=wan21_training_settings.get("sample_vae_path", ""))
+            sample_t5_path_wan21 = gr.Textbox(label="T5 Path (--t5) / T5模型路径", placeholder="例如：K:/models/wan2.1/t5.pth", value=wan21_training_settings.get("sample_t5_path", ""))
 
-        def toggle_generate_samples_wan(checked, custom_checked):
+        def toggle_generate_samples_wan21(checked, custom_checked):
             vis = gr.update(visible=checked)
             return (
                 vis, vis, vis, vis, vis, vis, vis, vis,
@@ -1259,53 +1587,179 @@ with gr.Blocks() as demo:
                 vis, vis, vis
             )
 
-        def toggle_custom_prompt_path_wan(checked, gen_checked):
+        def toggle_custom_prompt_path_wan21(checked, gen_checked):
             return gr.update(visible=checked and gen_checked)
 
-        generate_samples_checkbox_wan.change(
-            toggle_generate_samples_wan,
-            inputs=[generate_samples_checkbox_wan, custom_prompt_txt_checkbox_wan],
+        generate_samples_checkbox_wan21.change(
+            toggle_generate_samples_wan21,
+            inputs=[generate_samples_checkbox_wan21, custom_prompt_txt_checkbox_wan21],
             outputs=[
-                sample_every_n_epochs_wan, sample_every_n_steps_wan, sample_prompt_text_wan,
-                sample_w_wan, sample_h_wan, sample_frames_wan, sample_seed_wan, sample_steps_wan,
-                custom_prompt_txt_checkbox_wan, custom_prompt_path_wan,
-                prompt_file_upload_wan, sample_vae_path_wan, sample_t5_path_wan
+                sample_every_n_epochs_wan21, sample_every_n_steps_wan21, sample_prompt_text_wan21,
+                sample_w_wan21, sample_h_wan21, sample_frames_wan21, sample_seed_wan21, sample_steps_wan21,
+                custom_prompt_txt_checkbox_wan21, custom_prompt_path_wan21,
+                prompt_file_upload_wan21, sample_vae_path_wan21, sample_t5_path_wan21
             ]
         )
 
-        custom_prompt_txt_checkbox_wan.change(
-            toggle_custom_prompt_path_wan,
-            inputs=[custom_prompt_txt_checkbox_wan, generate_samples_checkbox_wan],
-            outputs=custom_prompt_path_wan
+        custom_prompt_txt_checkbox_wan21.change(
+            toggle_custom_prompt_path_wan21,
+            inputs=[custom_prompt_txt_checkbox_wan21, generate_samples_checkbox_wan21],
+            outputs=custom_prompt_path_wan21
         )
         with gr.Row():
-            run_wan_train_button = gr.Button("Run Wan Training / 开始Wan训练")
-            stop_wan_train_button = gr.Button("Stop Training / 停止训练")
-        wan_train_output = gr.Textbox(label="Wan Training Output / Wan训练输出", lines=20, interactive=False)
-        run_wan_train_button.click(
+            run_wan21_train_button = gr.Button("Run Wan2.1 Training / 开始Wan2.1训练")
+            stop_wan21_train_button = gr.Button("Stop Training / 停止训练")
+        wan21_train_output = gr.Textbox(label="Wan2.1 Training Output / Wan2.1训练输出", lines=20, interactive=False)
+        run_wan21_train_button.click(
             fn=run_wan_training,
             inputs=[
-                dataset_config_file_wan, dataset_config_text_wan,
-                task_dropdown, dit_weights_path_wan, dit_high_noise_path_wan, timestep_boundary_wan,
-                offload_inactive_dit_wan, preserve_distribution_shape_wan,
-                max_train_epochs_wan, learning_rate_wan, network_dim_wan,
-                gradient_accumulation_steps_wan, enable_low_vram_wan, blocks_to_swap_wan,
-                output_dir_wan, output_name_wan, save_every_n_epochs_wan, save_every_n_steps_wan,
-                use_network_weights_wan, network_weights_path_wan,
-                use_clip_wan, clip_model_path_wan,
-                timestep_sampling_input, discrete_flow_shift_input,
-                generate_samples_checkbox_wan, sample_every_n_epochs_wan, sample_every_n_steps_wan,
-                sample_prompt_text_wan, sample_w_wan, sample_h_wan,
-                sample_frames_wan, sample_seed_wan, sample_steps_wan,
-                custom_prompt_txt_checkbox_wan, custom_prompt_path_wan,
-                prompt_file_upload_wan, sample_vae_path_wan, sample_t5_path_wan
+                dataset_config_file_wan21, dataset_config_text_wan21,
+                task_dropdown_wan21, dit_weights_path_wan21, dit_high_noise_path_wan21, timestep_boundary_wan21,
+                offload_inactive_dit_wan21, preserve_distribution_shape_wan21, use_one_frame_checkbox_wan21,
+                max_train_epochs_wan21, learning_rate_wan21, network_dim_wan21,
+                gradient_accumulation_steps_wan21, enable_low_vram_wan21, blocks_to_swap_wan21,
+                output_dir_wan21, output_name_wan21, save_every_n_epochs_wan21, save_every_n_steps_wan21,
+                use_network_weights_wan21, network_weights_path_wan21,
+                use_clip_wan21, clip_model_path_wan21,
+                timestep_sampling_input_wan21, discrete_flow_shift_input_wan21,
+                generate_samples_checkbox_wan21, sample_every_n_epochs_wan21, sample_every_n_steps_wan21,
+                sample_prompt_text_wan21, sample_w_wan21, sample_h_wan21,
+                sample_frames_wan21, sample_seed_wan21, sample_steps_wan21,
+                custom_prompt_txt_checkbox_wan21, custom_prompt_path_wan21,
+                prompt_file_upload_wan21, sample_vae_path_wan21, sample_t5_path_wan21,
+                gr.State("wan21_training")
             ],
-            outputs=wan_train_output
+            outputs=wan21_train_output
         )
-        stop_wan_train_button.click(fn=stop_training, inputs=None, outputs=wan_train_output)
+        stop_wan21_train_button.click(fn=stop_training, inputs=None, outputs=wan21_train_output)
 
     ########################################
-    # (4) FramePack Training / 训练 FramePack 页面
+    # (4) Wan2.2 Training
+    ########################################
+    with gr.Tab("Training Wan2.2 / Wan2.2训练"):
+        gr.Markdown("## Wan2.2 Network Training / Wan2.2网络训练")
+        with gr.Row():
+            dataset_config_file_wan22 = gr.File(label="Upload dataset_config (toml) / 上传数据集配置文件", file_count="single", file_types=[".toml"], type="filepath")
+            dataset_config_text_wan22 = gr.Textbox(label="Or input toml path / 或输入toml文件路径", placeholder="Example: K:/ai_software/config.toml", value=wan22_training_settings.get("dataset_config_text", ""))
+        with gr.Row():
+            task_dropdown_wan22 = gr.Dropdown(label="Task / 任务", choices=["t2v-A14B", "i2v-A14B"], value=wan22_training_settings.get("task", "t2v-A14B"))
+            dit_weights_path_wan22 = gr.Textbox(label="Low-Noise DiT Path (--dit) / 低噪声DiT权重路径", placeholder="Example: K:/models/wan/dit_low.safetensors", value=wan22_training_settings.get("dit_weights_path", ""))
+        with gr.Row():
+            dit_high_noise_path_wan22 = gr.Textbox(label="High-Noise DiT Path (--dit_high_noise) / 高噪声DiT权重路径", placeholder="Example: K:/models/wan/dit_high.safetensors", value=wan22_training_settings.get("dit_high_noise_path", ""))
+            timestep_boundary_wan22 = gr.Number(label="Timestep Boundary / 时间步界限", value=wan22_training_settings.get("timestep_boundary", 0.9), precision=3)
+        use_one_frame_checkbox_wan22 = gr.Checkbox(label="Use One Frame (--one_frame) / 使用单帧", value=wan22_training_settings.get("use_one_frame", False))
+        with gr.Row():
+            max_train_epochs_wan22 = gr.Number(label="Training Epochs (>=2) / 训练轮数", value=wan22_training_settings.get("max_train_epochs", 16), precision=0)
+            learning_rate_wan22 = gr.Textbox(label="Learning Rate (e.g. 2e-4) / 学习率", value=wan22_training_settings.get("learning_rate", "2e-4"))
+        with gr.Row():
+            network_dim_wan22 = gr.Number(label="Network Dim (2-128) / 网络维度", value=wan22_training_settings.get("network_dim", 32), precision=0)
+            gradient_accumulation_steps_wan22 = gr.Number(label="Gradient Accumulation Steps / 梯度累积步数", value=wan22_training_settings.get("gradient_accumulation_steps", 1), precision=0)
+        with gr.Row():
+            timestep_sampling_input_wan22 = gr.Textbox(label="Timestep Sampling / 时间步采样", value=wan22_training_settings.get("timestep_sampling", "shift"))
+            discrete_flow_shift_input_wan22 = gr.Number(label="Discrete Flow Shift / 离散流移位", value=wan22_training_settings.get("discrete_flow_shift", 3.0), precision=1)
+        with gr.Row():
+            offload_inactive_dit_wan22 = gr.Checkbox(label="Offload Inactive DiT / 将未使用DiT移至CPU", value=wan22_training_settings.get("offload_inactive_dit", False))
+            preserve_distribution_shape_wan22 = gr.Checkbox(label="Preserve Distribution Shape / 保持分布形状", value=wan22_training_settings.get("preserve_distribution_shape", False))
+            enable_low_vram_wan22 = gr.Checkbox(label="Enable Low VRAM Mode / 启用低显存模式", value=wan22_training_settings.get("enable_low_vram", False))
+            blocks_to_swap_wan22 = gr.Number(label="Blocks to Swap (20-36, even) / 交换块数(20-36，双数)", value=wan22_training_settings.get("blocks_to_swap", 20), precision=0, visible=wan22_training_settings.get("enable_low_vram", False))
+        def toggle_blocks_swap_wan22(checked):
+            return gr.update(visible=checked)
+        enable_low_vram_wan22.change(toggle_blocks_swap_wan22, inputs=enable_low_vram_wan22, outputs=blocks_to_swap_wan22)
+        with gr.Row():
+            output_dir_wan22 = gr.Textbox(label="Output Directory / 输出目录", placeholder="./output", value=wan22_training_settings.get("output_dir", "./output"))
+            output_name_wan22 = gr.Textbox(label="Output Name / 输出名称", placeholder="wan_lora", value=wan22_training_settings.get("output_name", "wan_lora"))
+        with gr.Row():
+            save_every_n_epochs_wan22 = gr.Number(label="Save Every N Epochs / 每N个轮次保存一次", value=wan22_training_settings.get("save_every_n_epochs", 1), precision=0)
+            save_every_n_steps_wan22 = gr.Number(label="Save Every N Steps / 每N步保存一次", value=wan22_training_settings.get("save_every_n_steps", 0), precision=0)
+        with gr.Row():
+            use_network_weights_wan22 = gr.Checkbox(label="Continue Training From Existing Weights / 从已有权重继续训练", value=wan22_training_settings.get("use_network_weights", False))
+            network_weights_path_wan22 = gr.Textbox(label="Weights File Path / 权重文件路径", placeholder="Input weights file path / 请输入权重文件路径", value=wan22_training_settings.get("network_weights_path", ""), visible=wan22_training_settings.get("use_network_weights", False))
+        def toggle_network_weights_input_wan22(checked):
+            return gr.update(visible=checked)
+        use_network_weights_wan22.change(toggle_network_weights_input_wan22, inputs=use_network_weights_wan22, outputs=network_weights_path_wan22)
+        with gr.Row():
+            use_clip_wan22 = gr.Checkbox(label="Use CLIP Model (--clip) (For I2V) / 使用CLIP模型（用于I2V）", value=wan22_training_settings.get("use_clip", False))
+            clip_model_path_wan22 = gr.Textbox(label="CLIP Model Path / CLIP模型路径", placeholder="Example: K:/models/wan/clip.pth", value=wan22_training_settings.get("clip_model_path", ""), visible=wan22_training_settings.get("use_clip", False))
+        def toggle_clip_input_wan22(checked):
+            return gr.update(visible=checked)
+        use_clip_wan22.change(toggle_clip_input_wan22, inputs=use_clip_wan22, outputs=clip_model_path_wan22)
+        with gr.Row():
+            generate_samples_checkbox_wan22 = gr.Checkbox(label="Generate Samples During Training? / 训练期间生成示例?", value=wan22_training_settings.get("generate_samples", False))
+        with gr.Row():
+            sample_every_n_epochs_wan22 = gr.Number(label="Sample Every N Epochs / 每N个轮次采样一次", value=wan22_training_settings.get("sample_every_n_epochs", 1), precision=0, visible=wan22_training_settings.get("generate_samples", False))
+            sample_every_n_steps_wan22 = gr.Number(label="Sample Every N Steps / 每N步采样一次", value=wan22_training_settings.get("sample_every_n_steps", 1000), precision=0, visible=wan22_training_settings.get("generate_samples", False))
+        sample_prompt_text_wan22 = gr.Textbox(label="Prompt Text / 提示文本", value=wan22_training_settings.get("sample_prompt_text", "A beautiful landscape in Wan style."), visible=wan22_training_settings.get("generate_samples", False))
+        with gr.Row():
+            sample_w_wan22 = gr.Number(label="Width (w) / 宽度", value=wan22_training_settings.get("sample_w", 832), precision=0, visible=wan22_training_settings.get("generate_samples", False))
+            sample_h_wan22 = gr.Number(label="Height (h) / 高度", value=wan22_training_settings.get("sample_h", 480), precision=0, visible=wan22_training_settings.get("generate_samples", False))
+            sample_frames_wan22 = gr.Number(label="Frames (f) / 帧数", value=wan22_training_settings.get("sample_frames", 81), precision=0, visible=wan22_training_settings.get("generate_samples", False))
+        with gr.Row():
+            sample_seed_wan22 = gr.Number(label="Seed (d) / 种子", value=wan22_training_settings.get("sample_seed", 42), precision=0, visible=wan22_training_settings.get("generate_samples", False))
+            sample_steps_wan22 = gr.Number(label="Steps (s) / 步数", value=wan22_training_settings.get("sample_steps", 20), precision=0, visible=wan22_training_settings.get("generate_samples", False))
+        custom_prompt_txt_checkbox_wan22 = gr.Checkbox(label="Use Custom Prompt File? / 使用自定义提示文件?", value=wan22_training_settings.get("custom_prompt_txt", False), visible=wan22_training_settings.get("generate_samples", False))
+        custom_prompt_path_wan22 = gr.Textbox(label="Custom Prompt File Path / 自定义提示文件路径", placeholder="Input prompt file path / 请输入提示文件路径", value=wan22_training_settings.get("custom_prompt_path", ""), visible=wan22_training_settings.get("generate_samples", False) and wan22_training_settings.get("custom_prompt_txt", False))
+        prompt_file_upload_wan22 = gr.File(label="Upload prompt_file.txt (Optional) / 上传提示文件(可选)", file_count="single", file_types=[".txt"], type="filepath", visible=wan22_training_settings.get("generate_samples", False))
+        with gr.Row(visible=wan22_training_settings.get("generate_samples", False)):
+            sample_vae_path_wan22 = gr.Textbox(label="VAE Path (--vae) / VAE文件路径", placeholder="例如：K:/models/wan2.2/vae.safetensors", value=wan22_training_settings.get("sample_vae_path", ""))
+            sample_t5_path_wan22 = gr.Textbox(label="T5 Path (--t5) / T5模型路径", placeholder="例如：K:/models/wan2.2/t5.pth", value=wan22_training_settings.get("sample_t5_path", ""))
+
+        def toggle_generate_samples_wan22(checked, custom_checked):
+            vis = gr.update(visible=checked)
+            return (
+                vis, vis, vis, vis, vis, vis, vis, vis,
+                gr.update(visible=checked),
+                gr.update(visible=checked and custom_checked),
+                vis, vis, vis
+            )
+
+        def toggle_custom_prompt_path_wan22(checked, gen_checked):
+            return gr.update(visible=checked and gen_checked)
+
+        generate_samples_checkbox_wan22.change(
+            toggle_generate_samples_wan22,
+            inputs=[generate_samples_checkbox_wan22, custom_prompt_txt_checkbox_wan22],
+            outputs=[
+                sample_every_n_epochs_wan22, sample_every_n_steps_wan22, sample_prompt_text_wan22,
+                sample_w_wan22, sample_h_wan22, sample_frames_wan22, sample_seed_wan22, sample_steps_wan22,
+                custom_prompt_txt_checkbox_wan22, custom_prompt_path_wan22,
+                prompt_file_upload_wan22, sample_vae_path_wan22, sample_t5_path_wan22
+            ]
+        )
+
+        custom_prompt_txt_checkbox_wan22.change(
+            toggle_custom_prompt_path_wan22,
+            inputs=[custom_prompt_txt_checkbox_wan22, generate_samples_checkbox_wan22],
+            outputs=custom_prompt_path_wan22
+        )
+        with gr.Row():
+            run_wan22_train_button = gr.Button("Run Wan2.2 Training / 开始Wan2.2训练")
+            stop_wan22_train_button = gr.Button("Stop Training / 停止训练")
+        wan22_train_output = gr.Textbox(label="Wan2.2 Training Output / Wan2.2训练输出", lines=20, interactive=False)
+        run_wan22_train_button.click(
+            fn=run_wan_training,
+            inputs=[
+                dataset_config_file_wan22, dataset_config_text_wan22,
+                task_dropdown_wan22, dit_weights_path_wan22, dit_high_noise_path_wan22, timestep_boundary_wan22,
+                offload_inactive_dit_wan22, preserve_distribution_shape_wan22, use_one_frame_checkbox_wan22,
+                max_train_epochs_wan22, learning_rate_wan22, network_dim_wan22,
+                gradient_accumulation_steps_wan22, enable_low_vram_wan22, blocks_to_swap_wan22,
+                output_dir_wan22, output_name_wan22, save_every_n_epochs_wan22, save_every_n_steps_wan22,
+                use_network_weights_wan22, network_weights_path_wan22,
+                use_clip_wan22, clip_model_path_wan22,
+                timestep_sampling_input_wan22, discrete_flow_shift_input_wan22,
+                generate_samples_checkbox_wan22, sample_every_n_epochs_wan22, sample_every_n_steps_wan22,
+                sample_prompt_text_wan22, sample_w_wan22, sample_h_wan22,
+                sample_frames_wan22, sample_seed_wan22, sample_steps_wan22,
+                custom_prompt_txt_checkbox_wan22, custom_prompt_path_wan22,
+                prompt_file_upload_wan22, sample_vae_path_wan22, sample_t5_path_wan22,
+                gr.State("wan22_training")
+            ],
+            outputs=wan22_train_output
+        )
+        stop_wan22_train_button.click(fn=stop_training, inputs=None, outputs=wan22_train_output)
+
+    ########################################
+    # (5) FramePack Training / 训练 FramePack 页面
     ########################################
     with gr.Tab("Training FramePack / FramePack训练"):
         gr.Markdown("## FramePack Network Training / FramePack网络训练")
@@ -1427,7 +1881,119 @@ with gr.Blocks() as demo:
         stop_fpack_train_button.click(fn=stop_training, inputs=None, outputs=fpack_train_output)
 
     ########################################
-    # (5) LoRA Conversion / LoRA 转换 页面
+    # (6) Qwen-Image Training
+    ########################################
+    with gr.Tab("Training Qwen-Image / Qwen-Image训练"):
+        gr.Markdown("## Qwen-Image Network Training / Qwen-Image网络训练")
+        with gr.Row():
+            dataset_config_file_qwen = gr.File(label="Upload dataset_config (toml) / 上传数据集配置文件", file_count="single", file_types=[".toml"], type="filepath")
+            dataset_config_text_qwen = gr.Textbox(label="Or input toml path / 或输入toml文件路径", placeholder="Example: K:/ai_software/config.toml", value=qwen_training_settings.get("dataset_config_text", ""))
+        with gr.Row():
+            dit_weights_path_qwen = gr.Textbox(label="DiT Path (--dit) / DiT权重路径", placeholder="Example: K:/models/qwen/dit.safetensors", value=qwen_training_settings.get("dit_weights_path", ""))
+            vae_path_qwen = gr.Textbox(label="VAE Path (--vae) / VAE文件路径", placeholder="Example: K:/models/qwen/vae.safetensors", value=qwen_training_settings.get("vae_path", ""))
+        with gr.Row():
+            text_encoder_path_qwen = gr.Textbox(label="Text Encoder Path (--text_encoder) / 文本编码器路径", placeholder="Example: K:/models/qwen/text_encoder.safetensors", value=qwen_training_settings.get("text_encoder_path", ""))
+            edit_model_qwen = gr.Checkbox(label="Enable Edit Mode (--edit) / 启用编辑模式", value=qwen_training_settings.get("edit_model", False))
+        with gr.Row():
+            max_train_epochs_qwen = gr.Number(label="Training Epochs (>=2) / 训练轮数", value=qwen_training_settings.get("max_train_epochs", 16), precision=0)
+            learning_rate_qwen = gr.Textbox(label="Learning Rate (e.g. 5e-5) / 学习率", value=qwen_training_settings.get("learning_rate", "5e-5"))
+        with gr.Row():
+            network_dim_qwen = gr.Number(label="Network Dim (2-128) / 网络维度", value=qwen_training_settings.get("network_dim", 16), precision=0)
+            gradient_accumulation_steps_qwen = gr.Number(label="Gradient Accumulation Steps / 梯度累积步数", value=qwen_training_settings.get("gradient_accumulation_steps", 1), precision=0)
+        enable_low_vram_qwen = gr.Checkbox(label="Enable Low VRAM Mode / 启用低显存模式", value=qwen_training_settings.get("enable_low_vram", False))
+        blocks_to_swap_qwen = gr.Number(label="Blocks to Swap / 交换块数", value=qwen_training_settings.get("blocks_to_swap", 16), precision=0, visible=qwen_training_settings.get("enable_low_vram", False))
+        def toggle_blocks_swap_qwen(checked):
+            return gr.update(visible=checked)
+        enable_low_vram_qwen.change(toggle_blocks_swap_qwen, inputs=enable_low_vram_qwen, outputs=blocks_to_swap_qwen)
+        with gr.Row():
+            output_dir_qwen = gr.Textbox(label="Output Directory / 输出目录", placeholder="./output", value=qwen_training_settings.get("output_dir", "./output"))
+            output_name_qwen = gr.Textbox(label="Output Name / 输出名称", placeholder="qwen_lora", value=qwen_training_settings.get("output_name", "qwen_lora"))
+        with gr.Row():
+            save_every_n_epochs_qwen = gr.Number(label="Save Every N Epochs / 每N个轮次保存一次", value=qwen_training_settings.get("save_every_n_epochs", 1), precision=0)
+            save_every_n_steps_qwen = gr.Number(label="Save Every N Steps / 每N步保存一次", value=qwen_training_settings.get("save_every_n_steps", 0), precision=0)
+        with gr.Row():
+            use_network_weights_qwen = gr.Checkbox(label="Continue Training From Existing Weights / 从已有权重继续训练", value=qwen_training_settings.get("use_network_weights", False))
+            network_weights_path_qwen = gr.Textbox(label="Weights File Path / 权重文件路径", placeholder="Input weights file path / 请输入权重文件路径", value=qwen_training_settings.get("network_weights_path", ""), visible=qwen_training_settings.get("use_network_weights", False))
+        def toggle_network_weights_input_qwen(checked):
+            return gr.update(visible=checked)
+        use_network_weights_qwen.change(toggle_network_weights_input_qwen, inputs=use_network_weights_qwen, outputs=network_weights_path_qwen)
+        with gr.Row():
+            run_qwen_train_button = gr.Button("Run Qwen-Image Training / 开始Qwen-Image训练")
+            stop_qwen_train_button = gr.Button("Stop Training / 停止训练")
+        qwen_train_output = gr.Textbox(label="Qwen-Image Training Output / Qwen-Image训练输出", lines=20, interactive=False)
+        run_qwen_train_button.click(
+            fn=run_qwen_image_training,
+            inputs=[
+                dataset_config_file_qwen, dataset_config_text_qwen,
+                dit_weights_path_qwen, vae_path_qwen, text_encoder_path_qwen,
+                max_train_epochs_qwen, learning_rate_qwen, network_dim_qwen,
+                gradient_accumulation_steps_qwen, enable_low_vram_qwen, blocks_to_swap_qwen,
+                output_dir_qwen, output_name_qwen, save_every_n_epochs_qwen, save_every_n_steps_qwen,
+                use_network_weights_qwen, network_weights_path_qwen, edit_model_qwen,
+                gr.State("qwen_training")
+            ],
+            outputs=qwen_train_output
+        )
+        stop_qwen_train_button.click(fn=stop_training, inputs=None, outputs=qwen_train_output)
+
+    ########################################
+    # (7) FLUX Kontext Training
+    ########################################
+    with gr.Tab("Training Kontext / Kontext训练"):
+        gr.Markdown("## FLUX.1 Kontext Network Training / FLUX.1 Kontext网络训练")
+        with gr.Row():
+            dataset_config_file_kon = gr.File(label="Upload dataset_config (toml) / 上传数据集配置文件", file_count="single", file_types=[".toml"], type="filepath")
+            dataset_config_text_kon = gr.Textbox(label="Or input toml path / 或输入toml文件路径", placeholder="Example: K:/ai_software/config.toml", value=kontext_training_settings.get("dataset_config_text", ""))
+        with gr.Row():
+            dit_weights_path_kon = gr.Textbox(label="DiT Path (--dit) / DiT权重路径", placeholder="Example: K:/models/kontext/dit.safetensors", value=kontext_training_settings.get("dit_weights_path", ""))
+            vae_path_kon = gr.Textbox(label="AE Path (--vae) / AE文件路径", placeholder="Example: K:/models/kontext/ae.safetensors", value=kontext_training_settings.get("vae_path", ""))
+        with gr.Row():
+            text_encoder1_path_kon = gr.Textbox(label="Text Encoder1 Path (--text_encoder1) / 文本编码器1路径", placeholder="Example: K:/models/kontext/t5.safetensors", value=kontext_training_settings.get("text_encoder1_path", ""))
+            text_encoder2_path_kon = gr.Textbox(label="Text Encoder2 Path (--text_encoder2) / 文本编码器2路径", placeholder="Example: K:/models/kontext/clip.safetensors", value=kontext_training_settings.get("text_encoder2_path", ""))
+        with gr.Row():
+            max_train_epochs_kon = gr.Number(label="Training Epochs (>=2) / 训练轮数", value=kontext_training_settings.get("max_train_epochs", 16), precision=0)
+            learning_rate_kon = gr.Textbox(label="Learning Rate (e.g. 1e-4) / 学习率", value=kontext_training_settings.get("learning_rate", "1e-4"))
+        with gr.Row():
+            network_dim_kon = gr.Number(label="Network Dim (2-128) / 网络维度", value=kontext_training_settings.get("network_dim", 32), precision=0)
+            gradient_accumulation_steps_kon = gr.Number(label="Gradient Accumulation Steps / 梯度累积步数", value=kontext_training_settings.get("gradient_accumulation_steps", 1), precision=0)
+        enable_low_vram_kon = gr.Checkbox(label="Enable Low VRAM Mode / 启用低显存模式", value=kontext_training_settings.get("enable_low_vram", False))
+        blocks_to_swap_kon = gr.Number(label="Blocks to Swap / 交换块数", value=kontext_training_settings.get("blocks_to_swap", 16), precision=0, visible=kontext_training_settings.get("enable_low_vram", False))
+        def toggle_blocks_swap_kon(checked):
+            return gr.update(visible=checked)
+        enable_low_vram_kon.change(toggle_blocks_swap_kon, inputs=enable_low_vram_kon, outputs=blocks_to_swap_kon)
+        with gr.Row():
+            output_dir_kon = gr.Textbox(label="Output Directory / 输出目录", placeholder="./output", value=kontext_training_settings.get("output_dir", "./output"))
+            output_name_kon = gr.Textbox(label="Output Name / 输出名称", placeholder="kontext_lora", value=kontext_training_settings.get("output_name", "kontext_lora"))
+        with gr.Row():
+            save_every_n_epochs_kon = gr.Number(label="Save Every N Epochs / 每N个轮次保存一次", value=kontext_training_settings.get("save_every_n_epochs", 1), precision=0)
+            save_every_n_steps_kon = gr.Number(label="Save Every N Steps / 每N步保存一次", value=kontext_training_settings.get("save_every_n_steps", 0), precision=0)
+        with gr.Row():
+            use_network_weights_kon = gr.Checkbox(label="Continue Training From Existing Weights / 从已有权重继续训练", value=kontext_training_settings.get("use_network_weights", False))
+            network_weights_path_kon = gr.Textbox(label="Weights File Path / 权重文件路径", placeholder="Input weights file path / 请输入权重文件路径", value=kontext_training_settings.get("network_weights_path", ""), visible=kontext_training_settings.get("use_network_weights", False))
+        def toggle_network_weights_input_kon(checked):
+            return gr.update(visible=checked)
+        use_network_weights_kon.change(toggle_network_weights_input_kon, inputs=use_network_weights_kon, outputs=network_weights_path_kon)
+        with gr.Row():
+            run_kon_train_button = gr.Button("Run Kontext Training / 开始Kontext训练")
+            stop_kon_train_button = gr.Button("Stop Training / 停止训练")
+        kon_train_output = gr.Textbox(label="Kontext Training Output / Kontext训练输出", lines=20, interactive=False)
+        run_kon_train_button.click(
+            fn=run_kontext_training,
+            inputs=[
+                dataset_config_file_kon, dataset_config_text_kon,
+                dit_weights_path_kon, vae_path_kon, text_encoder1_path_kon, text_encoder2_path_kon,
+                max_train_epochs_kon, learning_rate_kon, network_dim_kon,
+                gradient_accumulation_steps_kon, enable_low_vram_kon, blocks_to_swap_kon,
+                output_dir_kon, output_name_kon, save_every_n_epochs_kon, save_every_n_steps_kon,
+                use_network_weights_kon, network_weights_path_kon,
+                gr.State("kontext_training")
+            ],
+            outputs=kon_train_output
+        )
+        stop_kon_train_button.click(fn=stop_training, inputs=None, outputs=kon_train_output)
+
+    ########################################
+    # (8) LoRA Conversion / LoRA 转换 页面
     ########################################
     with gr.Tab("LoRA Conversion / LoRA转换"):
         gr.Markdown("## Convert LoRA to other formats (target=other) / 将LoRA转换为其他格式")
